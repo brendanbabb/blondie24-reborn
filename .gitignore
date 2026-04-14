@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Training artifacts (large, regenerable)
+checkpoints/
+logs/
+runs/
+*.pt
+*.pth
+*.ckpt
+
+# Profiling
+prof.out
+*.prof
+*.lprof
+
+# Archives / backups
+*.tar
+*.tar.gz
+*.tar_*
+*.zip
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Numba cache
+__pycache__/
+.numba_cache/
