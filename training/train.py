@@ -91,10 +91,17 @@ def train(config: Config):
     # === Initialize population ===
     population = Population(config.evolution, config.network)
 
+    resume_path = getattr(config.training, "resume_from", None)
+    if resume_path:
+        population.load_checkpoint(resume_path)
+        population.reset_fitness()
+
     print("=" * 64)
     print("  BLONDIE24 REBORN — Evolutionary Checkers")
     print("=" * 64)
     print(f"  Population size:  {config.evolution.population_size}")
+    if resume_path:
+        print(f"  Resumed from:     {resume_path} (gen {population.generation})")
     print(f"  Network weights:  {population.n_weights}")
     sched = getattr(config.training, "depth_schedule", None) or []
     if sched:
@@ -147,7 +154,9 @@ def train(config: Config):
     schedule = getattr(config.training, "depth_schedule", None) or []
     current_depth = config.search.depth
 
-    for gen in range(1, config.training.generations + 1):
+    start_gen = population.generation
+    end_gen = start_gen + config.training.generations
+    for gen in range(start_gen + 1, end_gen + 1):
         gen_start = time.time()
 
         # === Curriculum: update search depth if schedule says so ===
@@ -212,8 +221,8 @@ def train(config: Config):
             clear_gpu_cache()
 
     # === Final checkpoint (skip if the loop just saved the same generation) ===
-    if config.training.generations % config.training.checkpoint_every != 0:
-        _save_checkpoint(population, config, config.training.generations)
+    if end_gen % config.training.checkpoint_every != 0:
+        _save_checkpoint(population, config, end_gen)
 
     # Tear down worker pool if one was created
     if pool is not None:
@@ -271,8 +280,10 @@ def main():
     parser = argparse.ArgumentParser(description="Blondie24 Reborn — Evolutionary Checkers Training")
     parser.add_argument("--generations", type=int, default=250)
     parser.add_argument("--population", type=int, default=15)
-    parser.add_argument("--depth", type=int, default=4)
-    parser.add_argument("--games", type=int, default=5)
+    parser.add_argument("--depth", type=int, default=None,
+                        help="Search ply depth (default: 4, or checkpoint value when resuming)")
+    parser.add_argument("--games", type=int, default=None,
+                        help="Games per individual (default: 5, or checkpoint value when resuming)")
     parser.add_argument("--device", type=str, default="auto",
                         help="Device: 'auto', 'cuda', 'mps', or 'cpu'")
     parser.add_argument("--seed", type=int, default=42)
@@ -286,10 +297,43 @@ def main():
     parser.add_argument("--initial-sigma", type=float, default=None,
                         help="Starting mutation step size (default: 0.05; try 0.10 "
                              "for more behavioral diversity)")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Path to a population checkpoint (.pt) to resume from. "
+                             "--generations is interpreted as additional gens to run.")
     parser.add_argument("--depth-schedule", type=str, default=None,
                         help="Curriculum: gen:depth pairs, e.g. '0:2,20:4,50:6,100:8'. "
                              "Overrides --depth for each gen based on the schedule.")
     args = parser.parse_args()
+
+    # === Resume: adopt hyperparameters saved in the checkpoint unless the ===
+    # user explicitly overrode them on the CLI. Keeps resumed runs faithful
+    # to the overnight config (depth, loss_score, initial_sigma, ...).
+    resumed_cfg = None
+    if args.resume:
+        ckpt_probe = torch.load(args.resume, weights_only=False)
+        resumed_cfg = ckpt_probe.get("config", {}) or {}
+
+    def _fill_from_resume(attr: str, section: str, key: str, fresh_default):
+        if getattr(args, attr) is not None:
+            return
+        if resumed_cfg:
+            val = resumed_cfg.get(section, {}).get(key)
+            if val is not None:
+                setattr(args, attr, val)
+                return
+        setattr(args, attr, fresh_default)
+
+    _fill_from_resume("depth", "search", "depth", 4)
+    _fill_from_resume("games", "evolution", "games_per_individual", 5)
+    _fill_from_resume("loss_score", "evolution", "loss_score", None)
+    _fill_from_resume("initial_sigma", "evolution", "initial_sigma", None)
+
+    if resumed_cfg:
+        print(
+            f"  [resume] adopted from checkpoint: "
+            f"depth={args.depth}, games={args.games}, "
+            f"loss_score={args.loss_score}, initial_sigma={args.initial_sigma}"
+        )
 
     # Auto-detect device
     if args.device == "auto":
@@ -324,6 +368,7 @@ def main():
         config.evolution.loss_score = args.loss_score
     if args.initial_sigma is not None:
         config.evolution.initial_sigma = args.initial_sigma
+    config.training.resume_from = args.resume
     config.training.depth_schedule = _parse_depth_schedule(args.depth_schedule)
     if config.training.depth_schedule:
         # Seed config.search.depth with the schedule's first entry so the

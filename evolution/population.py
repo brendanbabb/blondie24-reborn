@@ -39,6 +39,33 @@ class Population:
         net = net.to(device)
         return net
     
+    def load_checkpoint(self, path: str):
+        """Replace individuals + generation counter from a saved checkpoint."""
+        import torch
+        ckpt = torch.load(path, weights_only=False)
+        loaded = ckpt["individuals"]
+        if len(loaded) != self.config.population_size:
+            print(
+                f"  [resume] population_size {self.config.population_size} -> "
+                f"{len(loaded)} (adopted from checkpoint)"
+            )
+            self.config.population_size = len(loaded)
+        first_w = np.asarray(loaded[0]["weights"])
+        if first_w.shape[0] != self.n_weights:
+            raise ValueError(
+                f"Checkpoint weight vector has {first_w.shape[0]} params but "
+                f"current network has {self.n_weights} — network architecture "
+                f"does not match checkpoint."
+            )
+        self.individuals = [
+            Individual(
+                weights=np.asarray(ind["weights"]),
+                sigmas=np.asarray(ind["sigmas"]),
+            )
+            for ind in loaded
+        ]
+        self.generation = int(ckpt["generation"])
+
     def reset_fitness(self):
         """Reset all fitness scores for a new generation."""
         for ind in self.individuals:
