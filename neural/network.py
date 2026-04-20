@@ -12,7 +12,7 @@ signal without having to learn it through the hidden layers. The sum of
 the 32 input values approximates (own pieces - opponent pieces), scaled
 by K for kings.
 
-Total evolvable parameters: 1,742
+Parameter count (1,743 including king_weight, or 1,742 as the paper reports it):
   fc1: 32×40 + 40 = 1,320
   fc2: 40×10 + 10 = 410
   fc3: 10×1 + 1   = 11
@@ -21,8 +21,9 @@ Total evolvable parameters: 1,742
   ─────────────────
   Total: 1,743
 
-(Fogel's paper reports ~1,742; the ±1 depends on whether the king weight
-is counted as a network parameter or a separate evolvable.)
+Chellapilla & Fogel 1999 reports 1,742 because the king weight is treated
+as a separate evolvable hyperparameter rather than a network parameter.
+Here we fold it into the flat weight vector, so the itemized total is 1,743.
 """
 
 import torch

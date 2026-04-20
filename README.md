@@ -1,14 +1,28 @@
 # Blondie24 Reborn
 
-**A modern Python reimplementation of Fogel & Chellapilla's evolutionary checkers player**
+**A modern Python reimplementation of Chellapilla & Fogel's evolutionary checkers work**
 
-Blondie24 was a landmark AI experiment (1999): a neural network learned to play checkers at expert level
-using only evolutionary programming — no human game knowledge, no opening books, no endgame databases.
-The weights of a feedforward neural network were evolved via a population-based evolutionary strategy,
-with fitness determined by round-robin tournament play.
+A feedforward neural network with no hand-crafted evaluation, no opening book, no endgame database,
+and no backprop — trained entirely by self-play under an evolutionary strategy.
 
-This project faithfully reimplements the core architecture in modern Python with PyTorch, designed to
-run on consumer GPU hardware.
+> **A note on the name.** "Blondie24" is the screen name used on Zone.com by the 2001 "Anaconda"
+> system (Chellapilla & Fogel 2001), which added a spatial-preprocessing layer on top of the 1999
+> network and reached expert-level (~2045 USCF) play. This repo reimplements the **1999 precursor**:
+> the 32→40→10→1 MLP with a piece-difference bypass and evolvable king weight, trained by pure EP
+> with a fitness signal of tournament wins/draws/losses. The Anaconda follow-up is planned in a
+> separate repo. We kept the catchy name.
+
+## Run the paper
+
+One flag reproduces the 1999 config:
+
+```bash
+python -m training.train --preset paper-1999 --generations 250
+```
+
+That's pop=15, 5 games per individual per generation vs. randomly chosen opponents, fixed 4-ply
+minimax, +1/0/−2 scoring, initial σ = 0.05, random pairing, no σ ceiling. Explicit flags still win,
+so `--preset paper-1999 --depth 6` keeps depth 6 while applying the rest.
 
 ---
 
@@ -69,12 +83,17 @@ This implementation faithfully reproduces the architecture from the original 199
   - fc3: 10×1 weights + 1 bias = 11
   - piece_diff_weight: 1 (bypass connection)
   - king_weight: 1
+  - *The 1999 paper reports 1,742. The ±1 is whether the king weight is counted as
+    a network parameter or as a separate evolvable hyperparameter; the itemization
+    above counts it.*
 - All evolved via evolutionary programming — none trained by backpropagation
 
-> **Note on the 2001 follow-up paper**: The later "Anaconda" system (Chellapilla & Fogel 2001)
-> added a spatial preprocessing (convolutional) layer that expanded the input representation,
-> bringing the total to ~5,046 weights and achieving expert-level play after ~840 generations.
-> That expansion is a planned follow-up in a separate repo.
+> **Note on the 2001 follow-up paper**: The later "Anaconda" system — which used the screen name
+> "Blondie24" on Zone.com — added a spatial preprocessing (sub-board feature) layer that expanded
+> the input representation, bringing the total to 5,047 weights and reaching expert-level
+> (~2045 USCF) play after ~840 generations. Training still used fixed 4-ply minimax; 6-ply and
+> 8-ply were only used at evaluation time vs. human opponents. That expansion is a planned
+> follow-up in a separate repo.
 
 ---
 
@@ -119,12 +138,23 @@ configuration is still reachable via defaults or explicit arguments:
 | Parallelism | Single-threaded | `multiprocessing.Pool` across CPU cores for tournaments; GPU lockstep scheduler across games | Modern hardware has cores the paper never had |
 | Monitoring | Not described in detail | Per-generation JSONL log, checkpoints every N gens, best-individual snapshots, GPU memory telemetry | Lets us debug the draw plateau empirically instead of waiting weeks for a result |
 
-Crucially, **the eval function, mutation operator, and selection rule are identical to the
-paper when defaults are used.** Every deviation above is a training-loop or
-compute-infrastructure change, not a change to the learning algorithm itself. That
-separation is deliberate: it means any behavior difference between this repo and the
-published Blondie24 trajectory is attributable to compute/search choices, not to a
-changed optimizer.
+Crucially, **the eval function, selection rule, and weight mutation operator are
+identical to the paper when defaults are used.** Every deviation in the table above is
+a training-loop or compute-infrastructure change, not a change to the learning
+algorithm itself. That separation is deliberate: it means any behavior difference
+between this repo and the published 1999 trajectory is attributable to compute/search
+choices, not to a changed optimizer.
+
+#### Known algorithmic deviations from the 1999 paper
+
+One code-level deviation we have not yet corrected, flagged here for honesty:
+
+- **King weight mutation.** The paper uses a dedicated multiplicative log-normal update
+  for K (K' = K·exp(N(0,1)/√2)) with the constraint K ∈ [1, 3]. This repo folds K into
+  the flat weight vector and mutates it with the same self-adaptive σᵢ rule as the
+  rest, with no explicit [1, 3] clamp. In practice the σ-rule keeps K near its
+  initialization across typical runs (K₀ = 2.0, σ₀ = 0.05), but a long run or a
+  high-σ setting could drift K out of [1, 3].
 
 ### Speed improvements
 
@@ -279,14 +309,15 @@ matter:
 - Smoke tests + correctness tests for every speedup (TT vs no-TT, JIT vs Python)
 - `play/human_vs_ai.py` for playing a loaded checkpoint interactively
 
-### Comparison to the 2001 "Anaconda" model (planned separate repo)
+### Comparison to the 2001 "Anaconda" / Blondie24 model (planned separate repo)
 
-| | Blondie24 (1999) — *this repo* | Anaconda (2001) — *planned* |
+| | 1999 precursor — *this repo* | Anaconda / Blondie24 (2001) — *planned* |
 |---|---|---|
 | Input representation | 32 raw squares | spatial preprocessing (2×2 … 10×10 sub-boards) |
-| Total evolvable weights | **1,743** | **~5,046** |
-| Training length to reach expert play | ~250–840 gens | ~840 gens |
-| Search depth reported | 4–6 ply | 6–8 ply |
+| Total evolvable weights | **1,742–1,743** (paper-count / with-king) | **5,047** |
+| Training generations reported | ~250 for A-class play | ~840 for expert (~2045 USCF) |
+| Training search depth | 4-ply | 4-ply (same as 1999) |
+| Evaluation search depth | 4-ply | 6-ply and 8-ply vs. humans on Zone.com |
 | Feature learning | none (raw board only) | positional sub-features evolved jointly |
 
 The Anaconda expansion is specifically the *input pre-processor* — the 32→40→10→1 MLP core
