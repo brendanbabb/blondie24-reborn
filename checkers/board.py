@@ -317,30 +317,28 @@ class Board:
         return black, white
     
     def __repr__(self) -> str:
-        """ASCII representation of the board."""
+        """ASCII representation of the board. Empty dark squares show their index."""
         symbols = {
-            EMPTY: "·",
             BLACK_PIECE: "b",
             BLACK_KING: "B",
             WHITE_PIECE: "w",
             WHITE_KING: "W",
         }
         lines = []
-        lines.append("  0 1 2 3 4 5 6 7")
+        lines.append("    " + " ".join(f"{c:2d}" for c in range(8)))
         for row in range(8):
-            line = f"{row} "
+            cells = []
             for col in range(8):
                 if (row + col) % 2 == 1:
-                    # playable square
-                    if row % 2 == 0:
-                        sq = row * 4 + col // 2
+                    sq = row * 4 + col // 2
+                    piece = self.squares[sq]
+                    if piece == EMPTY:
+                        cells.append(f"{sq:2d}")
                     else:
-                        sq = row * 4 + col // 2
-                    line += symbols[self.squares[sq]] + " "
+                        cells.append(f" {symbols[piece]}")
                 else:
-                    line += "  "
-            lines.append(line)
-        
+                    cells.append("  ")
+            lines.append(f"{row}   " + " ".join(cells))
         player_name = "Black" if self.current_player == BLACK else "White"
         lines.append(f"  Turn: {player_name}")
         return "\n".join(lines)
