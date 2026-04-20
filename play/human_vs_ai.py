@@ -16,8 +16,13 @@ from checkers.board import (
     BLACK_PIECE, BLACK_KING, WHITE_PIECE, WHITE_KING,
 )
 from neural.network import CheckersNet
+from neural.encoding import encode_board
 from search.minimax import make_agent
 from config import SearchConfig, NetworkConfig
+
+
+RESIGN = "RESIGN"
+DRAW_OFFER = "DRAW_OFFER"
 
 
 # ANSI escape sequences. Cell cells stay 2 chars wide — codes add no visual width.
@@ -139,7 +144,13 @@ def human_move(board: Board) -> object:
 
     while True:
         try:
-            choice = input(f"\n  Enter move number (0-{len(moves)-1}): ").strip()
+            choice = input(
+                f"\n  Enter move number (0-{len(moves)-1}), 'draw', or 'resign': "
+            ).strip().lower()
+            if choice in ("resign", "r"):
+                return RESIGN
+            if choice in ("draw", "d"):
+                return DRAW_OFFER
             idx = int(choice)
             if 0 <= idx < len(moves):
                 return moves[idx]
@@ -148,6 +159,21 @@ def human_move(board: Board) -> object:
             print(_paint("  Not a number. Try again.", C.WHITE_FG))
         except (EOFError, KeyboardInterrupt):
             raise SystemExit("\n  Game aborted.")
+
+
+def _blondie_accepts_draw(network: CheckersNet, board: Board) -> tuple[bool, float]:
+    """
+    Decide whether Blondie accepts a draw offer at the current position.
+
+    Called when it's the human's turn, so the encoding is from the human's
+    perspective. Blondie accepts unless it sees itself as clearly winning
+    (its own eval > 0.3, equivalently human-perspective eval < -0.3).
+    """
+    king_w = float(network.king_weight.item())
+    with torch.no_grad():
+        human_eval = network.evaluate_board(encode_board(board, king_w))
+    blondie_eval = -human_eval
+    return blondie_eval <= 0.3, blondie_eval
 
 
 def load_network(checkpoint_path: str, device: str = "cpu") -> CheckersNet:
@@ -175,12 +201,18 @@ def play(checkpoint: str, depth: int, device: str, human_color: str, max_moves: 
     print(_paint(f"  You are {human_color.upper()}  |  AI depth: {depth}", C.LABEL))
     print(_paint("  b/B = black (Blondie's pieces if you're white)   w/W = white", C.DIM))
     print(_paint("  Capitals are kings.  Numbers mark empty playable squares.", C.DIM))
+    print(_paint("  Type 'draw' or 'resign' at the move prompt to end the game.", C.DIM))
     print(_paint("=" * 60, C.LABEL))
+
+    winner = None
+    reason = "max moves"
 
     while move_num < max_moves:
         # Game-over check
-        game_over, winner = board.is_game_over()
+        game_over, w = board.is_game_over()
         if game_over:
+            winner = w
+            reason = "no moves"
             break
 
         # Threefold repetition
@@ -188,6 +220,7 @@ def play(checkpoint: str, depth: int, device: str, human_color: str, max_moves: 
         state_counts[key] = state_counts.get(key, 0) + 1
         if state_counts[key] >= 3:
             winner = None
+            reason = "threefold repetition"
             break
 
         human_turn = (
@@ -211,6 +244,25 @@ def play(checkpoint: str, depth: int, device: str, human_color: str, max_moves: 
 
         if human_turn:
             move = human_move(board)
+            if move == RESIGN:
+                winner = WHITE if human_color == "black" else BLACK
+                reason = "you resigned"
+                break
+            if move == DRAW_OFFER:
+                accept, bl_eval = _blondie_accepts_draw(network, board)
+                if accept:
+                    print(_paint(
+                        f"\n  Blondie accepts the draw.  [eval {bl_eval:+.2f}]",
+                        C.BLACK_FG + C.BOLD,
+                    ))
+                    winner = None
+                    reason = "draw agreed"
+                    break
+                print(_paint(
+                    f"\n  Blondie declines — it likes its position.  [eval {bl_eval:+.2f}]",
+                    C.BLACK_FG + C.BOLD,
+                ))
+                continue
             mover = "You"
             last_think_s = None
         else:
@@ -228,7 +280,6 @@ def play(checkpoint: str, depth: int, device: str, human_color: str, max_moves: 
         move_num += 1
 
     # Final board + result
-    reason = "no moves" if move_num < max_moves else "max moves"
     print("\n" + _header(move_num, board, human_color))
     if last_mover:
         mover_color = C.BLACK_FG if last_mover == "Blondie" else C.WHITE_FG
