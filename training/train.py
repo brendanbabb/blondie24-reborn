@@ -6,6 +6,10 @@ of checkers-playing neural networks from random initialization to
 (hopefully) expert-level play.
 
 Usage:
+    # Paper-faithful config (Chellapilla & Fogel 1999):
+    # pop=15, games=5, depth=4, random pairing, +1/0/-2 scoring, no sigma ceiling.
+    python -m training.train --preset paper-1999 --generations 250
+
     # Auto-detect GPU (will use RTX 5060 on Badger-1)
     python -m training.train --generations 250 --population 15 --depth 4
 
@@ -323,7 +327,30 @@ def main():
                         help="Tournament style: 'random' (paper-faithful: each "
                              "individual plays --games games vs randomly chosen "
                              "opponents) or 'round-robin' (every pair, both colors).")
+    parser.add_argument("--preset", type=str, default=None,
+                        choices=["paper-1999"],
+                        help="Named config preset. 'paper-1999' matches Chellapilla "
+                             "& Fogel 1999: pop=15, games=5, depth=4, random pairing, "
+                             "+1/0/-2 scoring, initial sigma 0.05, no sigma ceiling. "
+                             "Explicit CLI flags still win over the preset.")
     args = parser.parse_args()
+
+    # Presets fill args the user didn't set explicitly. Applied before resume
+    # logic so an explicit preset beats a checkpoint's saved config.
+    if args.preset == "paper-1999":
+        paper_defaults = {
+            "depth": 4,
+            "games": 5,
+            "loss_score": -2.0,
+            "win_score": 1.0,
+            "initial_sigma": 0.05,
+            "max_sigma": float("inf"),
+        }
+        for attr, val in paper_defaults.items():
+            if getattr(args, attr) is None:
+                setattr(args, attr, val)
+        print("  [preset] paper-1999 (Chellapilla & Fogel 1999) — "
+              "pop=15, games=5, depth=4, random pairing, +1/0/-2, sigma=0.05, no sigma ceiling")
 
     # === Resume: adopt hyperparameters saved in the checkpoint unless the ===
     # user explicitly overrode them on the CLI. Keeps resumed runs faithful
