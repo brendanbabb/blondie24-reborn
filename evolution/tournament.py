@@ -14,15 +14,17 @@ from evolution.population import Population
 from checkers.board import Board, BLACK, WHITE
 from checkers.game import play_game, GameResult
 from search.minimax import MinimaxAgent
-from search.fast_minimax import FastAgent
-from search.fast_minimax_jit import FastAgentJit
 from search.parallel_search import ParallelSearchScheduler
 from config import SearchConfig, EvolutionConfig
 
 
-def _build_fast_agents(population: Population,
-                       search_config: SearchConfig) -> list[FastAgentJit]:
-    """Pre-build numpy/Numba agents for CPU tournament play."""
+def _build_fast_agents(population: Population, search_config: SearchConfig):
+    """Pre-build numpy/Numba agents for CPU tournament play.
+
+    Numba is imported lazily so environments that can't load the numba
+    DLLs (e.g. WDAC-blocked Windows) can still use the torch-based paths.
+    """
+    from search.fast_minimax_jit import FastAgentJit
     return [FastAgentJit(ind.weights, search_config.depth)
             for ind in population.individuals]
 
@@ -45,6 +47,7 @@ def _mp_play_one(task):
     Returns (pair_id, winner_int, moves, reason) — a flat picklable tuple.
     winner_int: 1=black, -1=white, 0=draw.
     """
+    from search.fast_minimax_jit import FastAgentJit
     pair_id, black_w, white_w, depth, max_moves = task
     black = FastAgentJit(black_w, depth)
     white = FastAgentJit(white_w, depth)
@@ -71,10 +74,16 @@ def random_pairing_tournament(
     evolution_config: EvolutionConfig = EvolutionConfig(),
     device: str = "cpu",
     verbose: bool = False,
+    pool=None,
+    max_moves: int = 200,
 ):
     """
-    Each individual plays N games against randomly selected opponents.
-    Fitness = sum of game scores (win=+1, draw=0, loss=-1).
+    Each individual plays N games against randomly selected opponents
+    (the paper-faithful tournament style from Fogel 1999/2001).
+
+    On GPU, runs serially using the torch-based MinimaxAgent.
+    On CPU, uses the numpy/Numba FastAgent path. If a multiprocessing
+    Pool is provided, games are distributed across worker processes.
     """
     if isinstance(device, str):
         device = torch.device(device)
@@ -83,31 +92,85 @@ def random_pairing_tournament(
     n_games = evolution_config.games_per_individual
     population.reset_fitness()
 
-    # Pre-build all agents (networks loaded onto GPU once)
-    agents = _build_agents(population, search_config, device)
-
-    for i, individual in enumerate(pop):
+    # Build pairings up front so CPU/GPU/pool paths share the same schedule.
+    # Each entry: (player_idx, opponent_idx, player_is_black).
+    pairings = []
+    for i in range(len(pop)):
         opponents_idx = random.sample(
             [j for j in range(len(pop)) if j != i],
             min(n_games, len(pop) - 1)
         )
-
         for opp_idx in opponents_idx:
-            opponent = pop[opp_idx]
+            pairings.append((i, opp_idx, random.random() < 0.5))
 
-            if random.random() < 0.5:
-                result = play_game(agents[i], agents[opp_idx])
-                _update_fitness(individual, opponent, result,
+    # ── GPU path: serial MinimaxAgent ──
+    if device.type != "cpu":
+        agents = _build_agents(population, search_config, device)
+        for i, opp_idx, i_is_black in pairings:
+            if i_is_black:
+                result = play_game(agents[i], agents[opp_idx], max_moves=max_moves)
+                _update_fitness(pop[i], pop[opp_idx], result,
                                 player_is_black=True, config=evolution_config)
             else:
-                result = play_game(agents[opp_idx], agents[i])
-                _update_fitness(individual, opponent, result,
+                result = play_game(agents[opp_idx], agents[i], max_moves=max_moves)
+                _update_fitness(pop[i], pop[opp_idx], result,
                                 player_is_black=False, config=evolution_config)
-
             if verbose:
                 winner_str = {1: "Black", -1: "White", None: "Draw"}[result.winner]
                 print(f"  Game: {i} vs {opp_idx} → {winner_str} "
                       f"({result.moves} moves, {result.reason})")
+        return
+
+    # ── CPU path: serial FastAgentJit fallback ──
+    if pool is None:
+        agents = _build_fast_agents(population, search_config)
+        for i, opp_idx, i_is_black in pairings:
+            if i_is_black:
+                result = play_game(agents[i], agents[opp_idx], max_moves=max_moves)
+                _update_fitness(pop[i], pop[opp_idx], result,
+                                player_is_black=True, config=evolution_config)
+            else:
+                result = play_game(agents[opp_idx], agents[i], max_moves=max_moves)
+                _update_fitness(pop[i], pop[opp_idx], result,
+                                player_is_black=False, config=evolution_config)
+        return
+
+    # ── CPU multiprocess: distribute games across worker pool ──
+    tasks = []
+    pair_map = []  # pair_id -> (player_idx, opponent_idx, player_is_black)
+    depth = search_config.depth
+    for pair_id, (i, opp_idx, i_is_black) in enumerate(pairings):
+        if i_is_black:
+            black_w, white_w = pop[i].weights, pop[opp_idx].weights
+        else:
+            black_w, white_w = pop[opp_idx].weights, pop[i].weights
+        pair_map.append((i, opp_idx, i_is_black))
+        tasks.append((pair_id, black_w, white_w, depth, max_moves))
+
+    for pair_id, winner_int, _n_moves, _reason in pool.imap_unordered(
+        _mp_play_one, tasks, chunksize=2
+    ):
+        i, opp_idx, i_is_black = pair_map[pair_id]
+        player = pop[i]
+        opponent = pop[opp_idx]
+        player.games_played += 1
+        opponent.games_played += 1
+
+        if winner_int == 0:
+            player.fitness += evolution_config.draw_score
+            opponent.fitness += evolution_config.draw_score
+            player.draws += 1
+            opponent.draws += 1
+        elif (winner_int == BLACK and i_is_black) or (winner_int == WHITE and not i_is_black):
+            player.fitness += evolution_config.win_score
+            opponent.fitness += evolution_config.loss_score
+            player.wins += 1
+            opponent.losses += 1
+        else:
+            player.fitness += evolution_config.loss_score
+            opponent.fitness += evolution_config.win_score
+            player.losses += 1
+            opponent.wins += 1
 
 
 def round_robin_tournament(
@@ -227,6 +290,10 @@ def parallel_round_robin_tournament(
     king_weights = [float(net.king_weight.item()) for net in networks]
 
     scheduler = ParallelSearchScheduler(device)
+    # Stack all population weights onto GPU once per gen — lets the scheduler
+    # do one batched forward per tick instead of one forward per network.
+    from search.parallel_search import BatchedCheckersNets
+    batched_nets = BatchedCheckersNets(networks, device)
     depth = search_config.depth
 
     # Build all pairings: every ordered pair (i black, j white), i != j.
@@ -254,7 +321,11 @@ def parallel_round_robin_tournament(
         if not active:
             break
 
-        requests = []
+        req_boards = []
+        req_pop_idx = []
+        req_king_w = []
+        req_depths = []
+        req_roots = []
         request_games = []
         for g in active:
             board = g["board"]
@@ -279,19 +350,19 @@ def parallel_round_robin_tournament(
             else:
                 agent_idx = g["white_idx"]
 
-            requests.append((
-                board,
-                networks[agent_idx],
-                king_weights[agent_idx],
-                depth,
-                board.current_player,
-            ))
+            req_boards.append(board)
+            req_pop_idx.append(agent_idx)
+            req_king_w.append(king_weights[agent_idx])
+            req_depths.append(depth)
+            req_roots.append(board.current_player)
             request_games.append(g)
 
-        if not requests:
+        if not req_boards:
             continue
 
-        results = scheduler.run(requests)
+        results = scheduler.run_batched(
+            req_boards, req_pop_idx, req_king_w, req_depths, req_roots, batched_nets,
+        )
 
         for g, (move, _score) in zip(request_games, results):
             if move is None:
