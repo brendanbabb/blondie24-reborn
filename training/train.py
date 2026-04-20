@@ -116,31 +116,40 @@ def train(config: Config):
           f"{config.evolution.draw_score:+.1f} / "
           f"{config.evolution.loss_score:+.1f}")
     print(f"  Initial sigma:    {config.evolution.initial_sigma:.3f}")
+    print(f"  Max sigma:        {config.evolution.max_sigma:.3f}")
     print(f"  Device:           {device}")
     if device.type == "cuda":
         mem = gpu_memory_report()
         print(f"  GPU memory:       {mem.get('allocated_mb', 0):.0f} MB allocated")
     print("=" * 64)
 
-    # Determine tournament style. On GPU + round-robin, use the parallel
-    # scheduler which batches leaf evals across all in-flight games.
-    # On CPU, use multiprocessing Pool for parallel game play.
-    use_round_robin = config.evolution.population_size <= 20
+    # Determine tournament style. Default is "random" (paper-faithful).
+    # On GPU + round-robin, use the parallel scheduler which batches leaf
+    # evals across all in-flight games. On CPU, use multiprocessing Pool
+    # for parallel game play (applies to either tournament style).
+    use_round_robin = config.training.tournament == "round-robin"
     pool = None
+    n_workers = 0
+
+    if device.type == "cpu":
+        n_workers = config.training.num_workers or max(1, (os.cpu_count() or 2) - 1)
+        pool = mp.Pool(processes=n_workers, initializer=_mp_worker_init)
+
     if use_round_robin and device.type == "cuda":
         tournament_fn = parallel_round_robin_tournament
         tournament_name = "round-robin (parallel GPU)"
-    elif use_round_robin and device.type == "cpu":
-        tournament_fn = round_robin_tournament
-        n_workers = config.training.num_workers or max(1, (os.cpu_count() or 2) - 1)
-        pool = mp.Pool(processes=n_workers, initializer=_mp_worker_init)
-        tournament_name = f"round-robin (multiprocess, {n_workers} workers)"
     elif use_round_robin:
         tournament_fn = round_robin_tournament
-        tournament_name = "round-robin"
+        tournament_name = (f"round-robin (multiprocess, {n_workers} workers)"
+                           if pool else "round-robin")
     else:
         tournament_fn = random_pairing_tournament
-        tournament_name = "random-pairing"
+        if pool:
+            tournament_name = f"random-pairing (multiprocess, {n_workers} workers)"
+        elif device.type == "cuda":
+            tournament_name = "random-pairing (GPU)"
+        else:
+            tournament_name = "random-pairing"
     print(f"  Tournament:       {tournament_name}")
     print()
 
@@ -294,15 +303,26 @@ def main():
     parser.add_argument("--loss-score", type=float, default=None,
                         help="Score for a loss (default: Fogel -2.0; try -1.0 to "
                              "escape the draw plateau)")
+    parser.add_argument("--win-score", type=float, default=None,
+                        help="Score for a win (default: Fogel +1.0; try +2.0 to "
+                             "reward aggressive play)")
     parser.add_argument("--initial-sigma", type=float, default=None,
                         help="Starting mutation step size (default: 0.05; try 0.10 "
                              "for more behavioral diversity)")
+    parser.add_argument("--max-sigma", type=float, default=None,
+                        help="Ceiling on per-weight sigma to prevent runaway during "
+                             "flat-gradient phases (default: 0.5)")
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to a population checkpoint (.pt) to resume from. "
                              "--generations is interpreted as additional gens to run.")
     parser.add_argument("--depth-schedule", type=str, default=None,
                         help="Curriculum: gen:depth pairs, e.g. '0:2,20:4,50:6,100:8'. "
                              "Overrides --depth for each gen based on the schedule.")
+    parser.add_argument("--tournament", type=str, default="random",
+                        choices=["random", "round-robin"],
+                        help="Tournament style: 'random' (paper-faithful: each "
+                             "individual plays --games games vs randomly chosen "
+                             "opponents) or 'round-robin' (every pair, both colors).")
     args = parser.parse_args()
 
     # === Resume: adopt hyperparameters saved in the checkpoint unless the ===
@@ -326,7 +346,9 @@ def main():
     _fill_from_resume("depth", "search", "depth", 4)
     _fill_from_resume("games", "evolution", "games_per_individual", 5)
     _fill_from_resume("loss_score", "evolution", "loss_score", None)
+    _fill_from_resume("win_score", "evolution", "win_score", None)
     _fill_from_resume("initial_sigma", "evolution", "initial_sigma", None)
+    _fill_from_resume("max_sigma", "evolution", "max_sigma", None)
 
     if resumed_cfg:
         print(
@@ -366,9 +388,14 @@ def main():
     config.training.log_every = args.log_every
     if args.loss_score is not None:
         config.evolution.loss_score = args.loss_score
+    if args.win_score is not None:
+        config.evolution.win_score = args.win_score
     if args.initial_sigma is not None:
         config.evolution.initial_sigma = args.initial_sigma
+    if args.max_sigma is not None:
+        config.evolution.max_sigma = args.max_sigma
     config.training.resume_from = args.resume
+    config.training.tournament = args.tournament
     config.training.depth_schedule = _parse_depth_schedule(args.depth_schedule)
     if config.training.depth_schedule:
         # Seed config.search.depth with the schedule's first entry so the

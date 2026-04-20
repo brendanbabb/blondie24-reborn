@@ -68,6 +68,7 @@ def mutate(parent: Individual, config: EvolutionConfig) -> Individual:
     # Step 1: mutate sigmas
     new_sigmas = parent.sigmas * np.exp(tau_prime * global_noise + tau * per_weight_noise)
     new_sigmas = np.maximum(new_sigmas, config.min_sigma)  # floor
+    new_sigmas = np.minimum(new_sigmas, config.max_sigma)  # ceiling — prevents runaway
     
     # Step 2: mutate weights using the new sigmas
     weight_noise = np.random.randn(n)

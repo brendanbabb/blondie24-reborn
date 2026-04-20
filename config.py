@@ -61,6 +61,7 @@ class EvolutionConfig:
     tau: Optional[float] = None     # if None, computed as 1/sqrt(2*sqrt(n_weights))
     tau_prime: Optional[float] = None  # if None, computed as 1/sqrt(2*n_weights)
     min_sigma: float = 1e-5         # floor to prevent σ collapse
+    max_sigma: float = 0.5          # ceiling to prevent σ runaway on flat-gradient phases
     
     # Fitness scoring (Fogel 1999: +1 win, 0 draw, -2 loss)
     win_score: float = 1.0
@@ -81,6 +82,12 @@ class TrainingConfig:
     # Multiprocessing (CPU only): number of worker processes for parallel
     # tournament play. None means "auto" (all cores - 1).
     num_workers: Optional[int] = None
+
+    # Tournament style. "random" is paper-faithful (Fogel 1999/2001: each
+    # individual plays games_per_individual games vs randomly selected
+    # opponents). "round-robin" evaluates every pair in both colors — more
+    # accurate fitness, but not what the paper did.
+    tournament: str = "random"
 
     # Reproducibility
     seed: Optional[int] = 42
