@@ -39,6 +39,9 @@ _TT_UPPER = np.int8(2)
 _TT_SIZE = 1 << 20
 _TT_MASK = np.int64(_TT_SIZE - 1)
 
+_PVS_EPS = np.float32(1e-6)
+_ASP_DELTA = np.float32(0.1)
+
 
 @njit(cache=True, inline='always')
 def _hash_position_ana(squares, player):
@@ -198,14 +201,33 @@ def _alpha_beta_anaconda(
         value = -INF32
         for i in range(n_moves):
             new_sq = apply_move_fast(squares, buf[i])
-            child_v = _alpha_beta_anaconda(
-                new_sq, next_player, depth - 1, ply + 1,
-                alpha, beta, False, root_player,
-                W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
-                tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
-                killers, killers_valid,
-                move_bufs,
-            )
+            if i == 0:
+                child_v = _alpha_beta_anaconda(
+                    new_sq, next_player, depth - 1, ply + 1,
+                    alpha, beta, False, root_player,
+                    W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
+                    tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
+                    killers, killers_valid,
+                    move_bufs,
+                )
+            else:
+                child_v = _alpha_beta_anaconda(
+                    new_sq, next_player, depth - 1, ply + 1,
+                    alpha, alpha + _PVS_EPS, False, root_player,
+                    W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
+                    tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
+                    killers, killers_valid,
+                    move_bufs,
+                )
+                if child_v > alpha and child_v < beta:
+                    child_v = _alpha_beta_anaconda(
+                        new_sq, next_player, depth - 1, ply + 1,
+                        child_v, beta, False, root_player,
+                        W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
+                        tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
+                        killers, killers_valid,
+                        move_bufs,
+                    )
             if child_v > value:
                 value = child_v
                 best_idx = np.int8(i)
@@ -218,14 +240,33 @@ def _alpha_beta_anaconda(
         value = INF32
         for i in range(n_moves):
             new_sq = apply_move_fast(squares, buf[i])
-            child_v = _alpha_beta_anaconda(
-                new_sq, next_player, depth - 1, ply + 1,
-                alpha, beta, True, root_player,
-                W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
-                tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
-                killers, killers_valid,
-                move_bufs,
-            )
+            if i == 0:
+                child_v = _alpha_beta_anaconda(
+                    new_sq, next_player, depth - 1, ply + 1,
+                    alpha, beta, True, root_player,
+                    W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
+                    tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
+                    killers, killers_valid,
+                    move_bufs,
+                )
+            else:
+                child_v = _alpha_beta_anaconda(
+                    new_sq, next_player, depth - 1, ply + 1,
+                    beta - _PVS_EPS, beta, True, root_player,
+                    W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
+                    tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
+                    killers, killers_valid,
+                    move_bufs,
+                )
+                if child_v < beta and child_v > alpha:
+                    child_v = _alpha_beta_anaconda(
+                        new_sq, next_player, depth - 1, ply + 1,
+                        alpha, child_v, True, root_player,
+                        W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
+                        tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
+                        killers, killers_valid,
+                        move_bufs,
+                    )
             if child_v < value:
                 value = child_v
                 best_idx = np.int8(i)
@@ -308,6 +349,8 @@ class FastAgentJitAnaconda:
         best_move = root_py[0]
         best_score = -INF32
         prev_best_idx = 0
+        prev_score_set = False
+        prev_score = np.float32(0.0)
 
         start_depth = 2 if self.depth >= 2 else self.depth
         for current_depth in range(start_depth, self.depth + 1):
@@ -319,36 +362,84 @@ class FastAgentJitAnaconda:
                     root_py[prev_best_idx], root_py[0]
                 )
 
-            iter_best_score = -INF32
-            iter_best_idx = 0
-            iter_best_move = root_py[0]
-            alpha = -INF32
-            beta = INF32
+            if prev_score_set:
+                alpha0 = prev_score - _ASP_DELTA
+                beta0 = prev_score + _ASP_DELTA
+            else:
+                alpha0 = -INF32
+                beta0 = INF32
 
-            for i in range(n_root):
-                fast_move = root_buf[i].copy()
-                new_sq = apply_move_fast(board.squares, fast_move)
-                score = _alpha_beta_anaconda(
-                    new_sq, next_player,
-                    np.int64(current_depth - 1), np.int64(1),
-                    alpha, beta, False, root_player,
-                    self.W_pp, self.b_pp, self.W1, self.W2, self.b2, self.W3, self.b3,
-                    self.piece_diff, self.king_weight,
-                    self.tt_keys, self.tt_value, self.tt_depth, self.tt_flag,
-                    self.tt_best_idx,
-                    self.killers, self.killers_valid,
-                    self.move_bufs,
-                )
-                if score > iter_best_score:
-                    iter_best_score = score
-                    iter_best_move = root_py[i]
-                    iter_best_idx = i
-                if iter_best_score > alpha:
-                    alpha = iter_best_score
+            while True:
+                iter_best_score = -INF32
+                iter_best_idx = 0
+                iter_best_move = root_py[0]
+                alpha = alpha0
+                beta = beta0
+
+                for i in range(n_root):
+                    fast_move = root_buf[i].copy()
+                    new_sq = apply_move_fast(board.squares, fast_move)
+                    if i == 0:
+                        score = _alpha_beta_anaconda(
+                            new_sq, next_player,
+                            np.int64(current_depth - 1), np.int64(1),
+                            alpha, beta, False, root_player,
+                            self.W_pp, self.b_pp, self.W1, self.W2, self.b2, self.W3, self.b3,
+                            self.piece_diff, self.king_weight,
+                            self.tt_keys, self.tt_value, self.tt_depth, self.tt_flag,
+                            self.tt_best_idx,
+                            self.killers, self.killers_valid,
+                            self.move_bufs,
+                        )
+                    else:
+                        zw_hi = alpha + _PVS_EPS
+                        if zw_hi > beta:
+                            zw_hi = beta
+                        score = _alpha_beta_anaconda(
+                            new_sq, next_player,
+                            np.int64(current_depth - 1), np.int64(1),
+                            alpha, zw_hi, False, root_player,
+                            self.W_pp, self.b_pp, self.W1, self.W2, self.b2, self.W3, self.b3,
+                            self.piece_diff, self.king_weight,
+                            self.tt_keys, self.tt_value, self.tt_depth, self.tt_flag,
+                            self.tt_best_idx,
+                            self.killers, self.killers_valid,
+                            self.move_bufs,
+                        )
+                        if score > alpha and score < beta:
+                            score = _alpha_beta_anaconda(
+                                new_sq, next_player,
+                                np.int64(current_depth - 1), np.int64(1),
+                                score, beta, False, root_player,
+                                self.W_pp, self.b_pp, self.W1, self.W2, self.b2, self.W3, self.b3,
+                                self.piece_diff, self.king_weight,
+                                self.tt_keys, self.tt_value, self.tt_depth, self.tt_flag,
+                                self.tt_best_idx,
+                                self.killers, self.killers_valid,
+                                self.move_bufs,
+                            )
+                    if score > iter_best_score:
+                        iter_best_score = score
+                        iter_best_move = root_py[i]
+                        iter_best_idx = i
+                    if iter_best_score >= beta0:
+                        break
+                    if iter_best_score > alpha:
+                        alpha = iter_best_score
+
+                if iter_best_score <= alpha0 and alpha0 > -INF32:
+                    alpha0 = -INF32
+                    continue
+                if iter_best_score >= beta0 and beta0 < INF32:
+                    beta0 = INF32
+                    continue
+                break
 
             best_move = iter_best_move
             best_score = iter_best_score
             prev_best_idx = iter_best_idx
+            prev_score = iter_best_score
+            prev_score_set = True
 
         return best_move, float(best_score)
 
