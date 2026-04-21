@@ -136,15 +136,24 @@ def train(config: Config):
     n_workers = 0
 
     if device.type == "cpu":
-        n_workers = config.training.num_workers or max(1, (os.cpu_count() or 2) - 1)
-        # Warm the Numba JIT in the parent before spawning workers. With a cold
-        # disk cache, N workers racing to populate __pycache__ can produce
-        # cross-function link failures ("unresolved symbol $.numba.unresolved$...").
-        # Parent-side warmup guarantees the cache is fully written before any
-        # worker reads from it — subsequent workers hit warm cache and just load.
-        print(f"  Warming JIT in parent before spawning {n_workers} workers...")
-        _mp_worker_init()
-        pool = mp.Pool(processes=n_workers, initializer=_mp_worker_init)
+        requested = config.training.num_workers
+        if requested == 0:
+            # --no-mp: skip mp.Pool entirely. On Py3.14 + Numba 0.65, workers
+            # hang silently during JIT cache reload even with --workers 1, so
+            # serial in-parent is the only reliable CPU path.
+            n_workers = 0
+            print("  Warming JIT in parent (serial CPU, --no-mp)...")
+            _mp_worker_init()
+        else:
+            n_workers = requested or max(1, (os.cpu_count() or 2) - 1)
+            # Warm the Numba JIT in the parent before spawning workers. With a cold
+            # disk cache, N workers racing to populate __pycache__ can produce
+            # cross-function link failures ("unresolved symbol $.numba.unresolved$...").
+            # Parent-side warmup guarantees the cache is fully written before any
+            # worker reads from it — subsequent workers hit warm cache and just load.
+            print(f"  Warming JIT in parent before spawning {n_workers} workers...")
+            _mp_worker_init()
+            pool = mp.Pool(processes=n_workers, initializer=_mp_worker_init)
 
     if use_round_robin and device.type == "cuda":
         tournament_fn = parallel_round_robin_tournament
@@ -316,6 +325,9 @@ def main():
     parser.add_argument("--log-every", type=int, default=5)
     parser.add_argument("--workers", type=int, default=None,
                         help="Multiprocessing workers for CPU tournament (default: cpu_count - 1)")
+    parser.add_argument("--no-mp", action="store_true",
+                        help="Skip multiprocessing Pool; run tournament serially in-process "
+                             "(CPU fallback when worker pool hangs)")
     parser.add_argument("--loss-score", type=float, default=None,
                         help="Score for a loss (default: Fogel -2.0; try -1.0 to "
                              "escape the draw plateau)")
@@ -466,7 +478,7 @@ def main():
     config.evolution.games_per_individual = args.games
     config.network.architecture = args.architecture
     config.training.device = args.device
-    config.training.num_workers = args.workers
+    config.training.num_workers = 0 if args.no_mp else args.workers
     config.training.seed = args.seed
     config.training.checkpoint_every = args.checkpoint_every
     config.training.log_every = args.log_every
