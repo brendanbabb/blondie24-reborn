@@ -23,7 +23,7 @@ from checkers.fast_board import (
 )
 from neural.fast_eval import unpack_weights
 from search.fast_minimax import _py_move_key, _fast_move_key
-from search._order_helpers import order_moves, update_killers
+from search._order_helpers import order_moves, update_killers, update_history
 
 
 INF32 = np.float32(np.inf)
@@ -134,6 +134,7 @@ def _alpha_beta(
     W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
     killers, killers_valid,
+    history,
     move_bufs,
 ):
     buf = move_bufs[depth]
@@ -197,9 +198,11 @@ def _alpha_beta(
     canonical_of = np.empty(64, dtype=np.int8)
     for i in range(n_moves):
         canonical_of[i] = np.int8(i)
+    player_idx = np.int64(0) if player == 1 else np.int64(1)
     order_moves(
         buf, n_moves, np.int64(tt_move),
         killers, killers_valid, ply,
+        history, player_idx,
         canonical_of,
     )
 
@@ -219,6 +222,7 @@ def _alpha_beta(
                     W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
+                    history,
                     move_bufs,
                 )
             else:
@@ -229,6 +233,7 @@ def _alpha_beta(
                     W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
+                    history,
                     move_bufs,
                 )
                 if child_v > alpha and child_v < beta:
@@ -238,6 +243,7 @@ def _alpha_beta(
                         W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
                         tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                         killers, killers_valid,
+                        history,
                         move_bufs,
                     )
             if child_v > value:
@@ -247,6 +253,7 @@ def _alpha_beta(
                 alpha = value
             if alpha >= beta:
                 update_killers(killers, killers_valid, ply, buf, i)
+                update_history(history, player_idx, buf, i, depth)
                 break
     else:
         value = INF32
@@ -259,6 +266,7 @@ def _alpha_beta(
                     W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
+                    history,
                     move_bufs,
                 )
             else:
@@ -268,6 +276,7 @@ def _alpha_beta(
                     W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
+                    history,
                     move_bufs,
                 )
                 if child_v < beta and child_v > alpha:
@@ -277,6 +286,7 @@ def _alpha_beta(
                         W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
                         tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                         killers, killers_valid,
+                        history,
                         move_bufs,
                     )
             if child_v < value:
@@ -286,6 +296,7 @@ def _alpha_beta(
                 beta = value
             if alpha >= beta:
                 update_killers(killers, killers_valid, ply, buf, i)
+                update_history(history, player_idx, buf, i, depth)
                 break
 
     if value <= alpha0:
@@ -341,6 +352,13 @@ class FastAgentJit:
         # but we allocate the slot to keep the indexing simple.
         self.killers        = np.zeros((depth + 1, 2, MOVE_SLOTS), dtype=np.int8)
         self.killers_valid  = np.zeros((depth + 1, 2), dtype=np.int8)
+
+        # History heuristic: depth^2 bonus accumulated on beta cutoffs, keyed
+        # by [side_to_move][from_sq][to_sq]. Persists across `search()` calls
+        # on the same agent — like TT, bleed-through from prior positions is
+        # noise that still improves ordering on average. int32 headroom is
+        # ~2e9 which depth^2 cutoffs won't realistically saturate.
+        self.history = np.zeros((2, 32, 32), dtype=np.int32)
 
         self.nodes_evaluated = 0  # kept for interface compatibility
 
@@ -418,6 +436,7 @@ class FastAgentJit:
                             self.tt_keys, self.tt_value, self.tt_depth, self.tt_flag,
                             self.tt_best_idx,
                             self.killers, self.killers_valid,
+                            self.history,
                             self.move_bufs,
                         )
                     else:
@@ -433,6 +452,7 @@ class FastAgentJit:
                             self.tt_keys, self.tt_value, self.tt_depth, self.tt_flag,
                             self.tt_best_idx,
                             self.killers, self.killers_valid,
+                            self.history,
                             self.move_bufs,
                         )
                         if score > alpha and score < beta:
@@ -445,6 +465,7 @@ class FastAgentJit:
                                 self.tt_keys, self.tt_value, self.tt_depth, self.tt_flag,
                                 self.tt_best_idx,
                                 self.killers, self.killers_valid,
+                                self.history,
                                 self.move_bufs,
                             )
                     if score > iter_best_score:
