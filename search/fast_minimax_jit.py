@@ -23,6 +23,7 @@ from checkers.fast_board import (
 )
 from neural.fast_eval import unpack_weights
 from search.fast_minimax import _py_move_key, _fast_move_key
+from search._order_helpers import order_moves, update_killers
 
 
 INF32 = np.float32(np.inf)
@@ -119,9 +120,10 @@ def _eval_position(
 
 @njit(cache=True)
 def _alpha_beta(
-    squares, player, depth, alpha, beta, maximizing, root_player,
+    squares, player, depth, ply, alpha, beta, maximizing, root_player,
     W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
+    killers, killers_valid,
     move_bufs,
 ):
     buf = move_bufs[depth]
@@ -129,14 +131,12 @@ def _alpha_beta(
         squares, player, NEIGHBORS, JUMP_TARGETS, DIR_DR, buf
     )
     if n_moves == 0:
-        # Current player has no legal moves -> loses
         winner = -player
         if winner == root_player:
             return INF32
         else:
             return -INF32
 
-    # ── Leaf level: expand one more ply and eval each child ──
     if depth == 1:
         next_player = -player
         if maximizing:
@@ -150,7 +150,6 @@ def _alpha_beta(
                 new_sq, next_player, NEIGHBORS, JUMP_TARGETS, DIR_DR, gc_buf
             )
             if gc_count == 0:
-                # Child (next_player) has no moves -> player wins
                 winner = player
                 if winner == root_player:
                     child_score = INF32
@@ -170,7 +169,6 @@ def _alpha_beta(
                     best = child_score
         return best
 
-    # ── Interior node: TT probe ──
     key = _hash_position(squares, player)
     slot = np.int64(key) & _TT_MASK
     tt_move = np.int8(-1)
@@ -186,15 +184,14 @@ def _alpha_beta(
             if f == _TT_UPPER and v <= alpha:
                 return v
 
-    # Move ordering: swap the TT-suggested best move into slot 0 so the
-    # most-likely-best child is searched first, maximizing alpha-beta cutoffs.
-    swapped = False
-    if tt_move > 0 and tt_move < n_moves:
-        for k in range(MOVE_SLOTS):
-            tmp = buf[0, k]
-            buf[0, k] = buf[tt_move, k]
-            buf[tt_move, k] = tmp
-        swapped = True
+    canonical_of = np.empty(64, dtype=np.int8)
+    for i in range(n_moves):
+        canonical_of[i] = np.int8(i)
+    order_moves(
+        buf, n_moves, np.int64(tt_move),
+        killers, killers_valid, ply,
+        canonical_of,
+    )
 
     alpha0 = alpha
     beta0 = beta
@@ -206,10 +203,11 @@ def _alpha_beta(
         for i in range(n_moves):
             new_sq = apply_move_fast(squares, buf[i])
             child_v = _alpha_beta(
-                new_sq, next_player, depth - 1,
+                new_sq, next_player, depth - 1, ply + 1,
                 alpha, beta, False, root_player,
                 W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
                 tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
+                killers, killers_valid,
                 move_bufs,
             )
             if child_v > value:
@@ -218,16 +216,18 @@ def _alpha_beta(
             if value > alpha:
                 alpha = value
             if alpha >= beta:
+                update_killers(killers, killers_valid, ply, buf, i)
                 break
     else:
         value = INF32
         for i in range(n_moves):
             new_sq = apply_move_fast(squares, buf[i])
             child_v = _alpha_beta(
-                new_sq, next_player, depth - 1,
+                new_sq, next_player, depth - 1, ply + 1,
                 alpha, beta, True, root_player,
                 W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
                 tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
+                killers, killers_valid,
                 move_bufs,
             )
             if child_v < value:
@@ -236,29 +236,20 @@ def _alpha_beta(
             if value < beta:
                 beta = value
             if alpha >= beta:
+                update_killers(killers, killers_valid, ply, buf, i)
                 break
 
-    # ── TT store ──
     if value <= alpha0:
         flag = _TT_UPPER
     elif value >= beta0:
         flag = _TT_LOWER
     else:
         flag = _TT_EXACT
-    # Translate post-swap best_idx back to the canonical move-list order so
-    # the next visit (which re-derives the canonical order from move-gen)
-    # still points at the same physical move.
-    canonical_best = best_idx
-    if swapped:
-        if best_idx == 0:
-            canonical_best = tt_move
-        elif best_idx == tt_move:
-            canonical_best = np.int8(0)
     tt_keys[slot] = key
     tt_value[slot] = value
     tt_depth[slot] = depth
     tt_flag[slot] = flag
-    tt_best_idx[slot] = canonical_best
+    tt_best_idx[slot] = canonical_of[best_idx]
 
     return value
 
@@ -295,6 +286,13 @@ class FastAgentJit:
         self.tt_flag     = np.zeros(_TT_SIZE, dtype=np.int8)
         self.tt_best_idx = np.full(_TT_SIZE, -1, dtype=np.int8)
 
+        # Killer move table: ply-indexed, 2 killers per ply. Killers are
+        # stored as full move encodings (not indices) so they survive
+        # reorderings at each node. ply 0 is the root and has no siblings,
+        # but we allocate the slot to keep the indexing simple.
+        self.killers        = np.zeros((depth + 1, 2, MOVE_SLOTS), dtype=np.int8)
+        self.killers_valid  = np.zeros((depth + 1, 2), dtype=np.int8)
+
         self.nodes_evaluated = 0  # kept for interface compatibility
 
     def search(self, board: Board):
@@ -306,44 +304,71 @@ class FastAgentJit:
 
         # Invalidate TT each search: entries are keyed on (squares, player)
         # but values are relative to root_player, which flips across calls.
+        # Shallow-iteration TT entries ARE kept across IDDFS iterations
+        # within a single search — that's how IDDFS pays off.
         self.tt_depth.fill(-1)
+        self.killers_valid.fill(0)
 
-        # Get fast moves for the root
         root_buf = np.zeros((64, MOVE_SLOTS), dtype=np.int8)
         n_root = get_legal_moves_fast(
             board.squares, board.current_player,
             NEIGHBORS, JUMP_TARGETS, DIR_DR, root_buf,
         )
         py_by_key = {_py_move_key(m): m for m in py_moves}
+        root_py = [py_by_key[_fast_move_key(root_buf[i])] for i in range(n_root)]
 
         root_player = np.int8(board.current_player)
         next_player = np.int8(-board.current_player)
 
-        best_move = py_moves[0]
+        best_move = root_py[0]
         best_score = -INF32
-        alpha = -INF32
-        beta = INF32
+        prev_best_idx = 0
 
-        for i in range(n_root):
-            fast_move = root_buf[i].copy()
-            key = _fast_move_key(fast_move)
-            py_move = py_by_key[key]
+        # IDDFS: iterate current_depth = 2..self.depth. Iteration 1 would be
+        # a static eval of each root child — cheap but no TT seeding value;
+        # we skip it. The shallowest useful iteration is current_depth = 2
+        # (single _alpha_beta call at depth = 1 per root move), which is
+        # the existing leaf-level code path.
+        start_depth = 2 if self.depth >= 2 else self.depth
+        for current_depth in range(start_depth, self.depth + 1):
+            if prev_best_idx > 0:
+                tmp_row = root_buf[0].copy()
+                root_buf[0] = root_buf[prev_best_idx]
+                root_buf[prev_best_idx] = tmp_row
+                root_py[0], root_py[prev_best_idx] = (
+                    root_py[prev_best_idx], root_py[0]
+                )
 
-            new_sq = apply_move_fast(board.squares, fast_move)
-            score = _alpha_beta(
-                new_sq, next_player, np.int64(self.depth - 1),
-                alpha, beta, False, root_player,
-                self.W1, self.b1, self.W2, self.b2, self.W3, self.b3,
-                self.piece_diff, self.king_weight,
-                self.tt_keys, self.tt_value, self.tt_depth, self.tt_flag,
-                self.tt_best_idx,
-                self.move_bufs,
-            )
-            if score > best_score:
-                best_score = score
-                best_move = py_move
-            if best_score > alpha:
-                alpha = best_score
+            iter_best_score = -INF32
+            iter_best_idx = 0
+            iter_best_move = root_py[0]
+            alpha = -INF32
+            beta = INF32
+
+            for i in range(n_root):
+                fast_move = root_buf[i].copy()
+                new_sq = apply_move_fast(board.squares, fast_move)
+                score = _alpha_beta(
+                    new_sq, next_player,
+                    np.int64(current_depth - 1), np.int64(1),
+                    alpha, beta, False, root_player,
+                    self.W1, self.b1, self.W2, self.b2, self.W3, self.b3,
+                    self.piece_diff, self.king_weight,
+                    self.tt_keys, self.tt_value, self.tt_depth, self.tt_flag,
+                    self.tt_best_idx,
+                    self.killers, self.killers_valid,
+                    self.move_bufs,
+                )
+                if score > iter_best_score:
+                    iter_best_score = score
+                    iter_best_move = root_py[i]
+                    iter_best_idx = i
+                if iter_best_score > alpha:
+                    alpha = iter_best_score
+
+            best_move = iter_best_move
+            best_score = iter_best_score
+            prev_best_idx = iter_best_idx
 
         return best_move, float(best_score)
 

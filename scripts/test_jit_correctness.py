@@ -20,7 +20,7 @@ def random_position(rng, max_ply=12):
         moves = board.get_legal_moves()
         if not moves or board.is_game_over()[0]:
             break
-        board.apply_move(moves[rng.integers(len(moves))])
+        board = board.apply_move(moves[rng.integers(len(moves))])
     return board
 
 
