@@ -137,6 +137,13 @@ def train(config: Config):
 
     if device.type == "cpu":
         n_workers = config.training.num_workers or max(1, (os.cpu_count() or 2) - 1)
+        # Warm the Numba JIT in the parent before spawning workers. With a cold
+        # disk cache, N workers racing to populate __pycache__ can produce
+        # cross-function link failures ("unresolved symbol $.numba.unresolved$...").
+        # Parent-side warmup guarantees the cache is fully written before any
+        # worker reads from it — subsequent workers hit warm cache and just load.
+        print(f"  Warming JIT in parent before spawning {n_workers} workers...")
+        _mp_worker_init()
         pool = mp.Pool(processes=n_workers, initializer=_mp_worker_init)
 
     if use_round_robin and device.type == "cuda":
