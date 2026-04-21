@@ -42,6 +42,10 @@ _TT_MASK = np.int64(_TT_SIZE - 1)
 _PVS_EPS = np.float32(1e-6)
 _ASP_DELTA = np.float32(0.1)
 
+# Quiescence: max forced-capture extension plies past the nominal depth.
+Q_MAX_DEPTH = np.int64(8)
+_KIND_JUMP = np.int8(1)
+
 
 @njit(cache=True, inline='always')
 def _hash_position_ana(squares, player):
@@ -118,12 +122,73 @@ def _eval_position_anaconda(
 
 
 @njit(cache=True)
+def _quiesce_anaconda(
+    squares, player, alpha, beta, maximizing, root_player,
+    W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
+    q_move_bufs, q_depth,
+):
+    """Anaconda-net mirror of _quiesce. See fast_minimax_jit.py for rationale."""
+    buf = q_move_bufs[q_depth]
+    n_moves = get_legal_moves_fast(
+        squares, player, NEIGHBORS, JUMP_TARGETS, DIR_DR, buf,
+    )
+    if n_moves == 0:
+        winner = -player
+        if winner == root_player:
+            return INF32
+        else:
+            return -INF32
+
+    is_jump = buf[0, 0] == _KIND_JUMP
+    if not is_jump or q_depth == 0:
+        return _eval_position_anaconda(
+            squares, player,
+            W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
+            root_player,
+        )
+
+    next_player = -player
+    if maximizing:
+        value = -INF32
+        for i in range(n_moves):
+            new_sq = apply_move_fast(squares, buf[i])
+            child_v = _quiesce_anaconda(
+                new_sq, next_player, alpha, beta, False, root_player,
+                W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
+                q_move_bufs, q_depth - 1,
+            )
+            if child_v > value:
+                value = child_v
+            if value > alpha:
+                alpha = value
+            if alpha >= beta:
+                break
+    else:
+        value = INF32
+        for i in range(n_moves):
+            new_sq = apply_move_fast(squares, buf[i])
+            child_v = _quiesce_anaconda(
+                new_sq, next_player, alpha, beta, True, root_player,
+                W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
+                q_move_bufs, q_depth - 1,
+            )
+            if child_v < value:
+                value = child_v
+            if value < beta:
+                beta = value
+            if alpha >= beta:
+                break
+    return value
+
+
+@njit(cache=True)
 def _alpha_beta_anaconda(
     squares, player, depth, ply, alpha, beta, maximizing, root_player,
     W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
     killers, killers_valid,
     history,
+    q_move_bufs, q_max_depth,
     move_bufs,
 ):
     buf = move_bufs[depth]
@@ -143,24 +208,17 @@ def _alpha_beta_anaconda(
             best = -INF32
         else:
             best = INF32
+        # Quiescence: child side is maximizing iff it is the root player
+        # (which is exactly "not maximizing" relative to the current node).
+        q_child_max = not maximizing
         for i in range(n_moves):
             new_sq = apply_move_fast(squares, buf[i])
-            gc_buf = move_bufs[0]
-            gc_count = get_legal_moves_fast(
-                new_sq, next_player, NEIGHBORS, JUMP_TARGETS, DIR_DR, gc_buf,
+            child_score = _quiesce_anaconda(
+                new_sq, next_player,
+                alpha, beta, q_child_max, root_player,
+                W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
+                q_move_bufs, q_max_depth,
             )
-            if gc_count == 0:
-                winner = player
-                if winner == root_player:
-                    child_score = INF32
-                else:
-                    child_score = -INF32
-            else:
-                child_score = _eval_position_anaconda(
-                    new_sq, next_player,
-                    W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
-                    root_player,
-                )
             if maximizing:
                 if child_score > best:
                     best = child_score
@@ -212,6 +270,7 @@ def _alpha_beta_anaconda(
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
                     history,
+                    q_move_bufs, q_max_depth,
                     move_bufs,
                 )
             else:
@@ -222,6 +281,7 @@ def _alpha_beta_anaconda(
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
                     history,
+                    q_move_bufs, q_max_depth,
                     move_bufs,
                 )
                 if child_v > alpha and child_v < beta:
@@ -232,6 +292,7 @@ def _alpha_beta_anaconda(
                         tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                         killers, killers_valid,
                         history,
+                        q_move_bufs, q_max_depth,
                         move_bufs,
                     )
             if child_v > value:
@@ -255,6 +316,7 @@ def _alpha_beta_anaconda(
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
                     history,
+                    q_move_bufs, q_max_depth,
                     move_bufs,
                 )
             else:
@@ -265,6 +327,7 @@ def _alpha_beta_anaconda(
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
                     history,
+                    q_move_bufs, q_max_depth,
                     move_bufs,
                 )
                 if child_v < beta and child_v > alpha:
@@ -275,6 +338,7 @@ def _alpha_beta_anaconda(
                         tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                         killers, killers_valid,
                         history,
+                        q_move_bufs, q_max_depth,
                         move_bufs,
                     )
             if child_v < value:
@@ -308,7 +372,11 @@ class FastAgentJitAnaconda:
     interface as FastAgentJit.
     """
 
-    def __init__(self, weights: np.ndarray, depth: int):
+    def __init__(
+        self, weights: np.ndarray, depth: int,
+        use_quiescence: bool = True,
+        q_max_depth: int = int(Q_MAX_DEPTH),
+    ):
         self.depth = depth
         self.weights = np.asarray(weights, dtype=np.float32)
         (W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight) = \
@@ -337,6 +405,13 @@ class FastAgentJitAnaconda:
         # History heuristic: depth^2 bonus on beta cutoffs, keyed by
         # [side_to_move][from_sq][to_sq]. See fast_minimax_jit.py for rationale.
         self.history = np.zeros((2, 32, 32), dtype=np.int32)
+
+        # Quiescence extension buffers. See fast_minimax_jit.py for rationale.
+        effective_q = int(q_max_depth) if use_quiescence else 0
+        self.q_max_depth = np.int64(min(effective_q, int(Q_MAX_DEPTH)))
+        self.q_move_bufs = np.zeros(
+            (int(Q_MAX_DEPTH) + 1, 64, MOVE_SLOTS), dtype=np.int8
+        )
 
         self.nodes_evaluated = 0
 
@@ -405,6 +480,7 @@ class FastAgentJitAnaconda:
                             self.tt_best_idx,
                             self.killers, self.killers_valid,
                             self.history,
+                            self.q_move_bufs, self.q_max_depth,
                             self.move_bufs,
                         )
                     else:
@@ -421,6 +497,7 @@ class FastAgentJitAnaconda:
                             self.tt_best_idx,
                             self.killers, self.killers_valid,
                             self.history,
+                            self.q_move_bufs, self.q_max_depth,
                             self.move_bufs,
                         )
                         if score > alpha and score < beta:
@@ -434,6 +511,7 @@ class FastAgentJitAnaconda:
                                 self.tt_best_idx,
                                 self.killers, self.killers_valid,
                                 self.history,
+                                self.q_move_bufs, self.q_max_depth,
                                 self.move_bufs,
                             )
                     if score > iter_best_score:

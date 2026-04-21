@@ -44,6 +44,12 @@ _PVS_EPS = np.float32(1e-6)
 # and re-search once.
 _ASP_DELTA = np.float32(0.1)
 
+# Quiescence: how many extra plies of forced-capture extension the leaf is
+# allowed to search past the nominal depth. Checkers jump sequences are
+# short (most capture chains are <= 3 plies), so 8 is plenty of headroom.
+Q_MAX_DEPTH = np.int64(8)
+_KIND_JUMP = np.int8(1)
+
 
 def _build_zobrist():
     """
@@ -129,12 +135,85 @@ def _eval_position(
 
 
 @njit(cache=True)
+def _quiesce(
+    squares, player, alpha, beta, maximizing, root_player,
+    W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
+    q_move_bufs, q_depth,
+):
+    """Extend the leaf search through forced-capture sequences.
+
+    Checkers mandates jumps when any are legal, so a "quiet" position is
+    one with no jumps available. When no jump is forced, return the
+    static eval. When a jump is forced, recurse into each jump with
+    fail-soft alpha-beta bounds until q_depth runs out or the position
+    becomes quiet.
+
+    Note there is no classical chess-style "stand-pat" test — the forced-
+    capture rule means the side to move can't refuse the jump, so we
+    cannot use the static eval as a lower bound for a maximizing side
+    that happens to be forced into bad captures.
+    """
+    buf = q_move_bufs[q_depth]
+    n_moves = get_legal_moves_fast(
+        squares, player, NEIGHBORS, JUMP_TARGETS, DIR_DR, buf
+    )
+    if n_moves == 0:
+        winner = -player
+        if winner == root_player:
+            return INF32
+        else:
+            return -INF32
+
+    is_jump = buf[0, 0] == _KIND_JUMP
+    if not is_jump or q_depth == 0:
+        return _eval_position(
+            squares, player,
+            W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
+            root_player,
+        )
+
+    next_player = -player
+    if maximizing:
+        value = -INF32
+        for i in range(n_moves):
+            new_sq = apply_move_fast(squares, buf[i])
+            child_v = _quiesce(
+                new_sq, next_player, alpha, beta, False, root_player,
+                W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
+                q_move_bufs, q_depth - 1,
+            )
+            if child_v > value:
+                value = child_v
+            if value > alpha:
+                alpha = value
+            if alpha >= beta:
+                break
+    else:
+        value = INF32
+        for i in range(n_moves):
+            new_sq = apply_move_fast(squares, buf[i])
+            child_v = _quiesce(
+                new_sq, next_player, alpha, beta, True, root_player,
+                W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
+                q_move_bufs, q_depth - 1,
+            )
+            if child_v < value:
+                value = child_v
+            if value < beta:
+                beta = value
+            if alpha >= beta:
+                break
+    return value
+
+
+@njit(cache=True)
 def _alpha_beta(
     squares, player, depth, ply, alpha, beta, maximizing, root_player,
     W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
     killers, killers_valid,
     history,
+    q_move_bufs, q_max_depth,
     move_bufs,
 ):
     buf = move_bufs[depth]
@@ -154,24 +233,17 @@ def _alpha_beta(
             best = -INF32
         else:
             best = INF32
+        # Quiescence: child side is maximizing iff it is the root player
+        # (which is exactly "not maximizing" relative to the current node).
+        q_child_max = not maximizing
         for i in range(n_moves):
             new_sq = apply_move_fast(squares, buf[i])
-            gc_buf = move_bufs[0]
-            gc_count = get_legal_moves_fast(
-                new_sq, next_player, NEIGHBORS, JUMP_TARGETS, DIR_DR, gc_buf
+            child_score = _quiesce(
+                new_sq, next_player,
+                alpha, beta, q_child_max, root_player,
+                W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
+                q_move_bufs, q_max_depth,
             )
-            if gc_count == 0:
-                winner = player
-                if winner == root_player:
-                    child_score = INF32
-                else:
-                    child_score = -INF32
-            else:
-                child_score = _eval_position(
-                    new_sq, next_player,
-                    W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
-                    root_player,
-                )
             if maximizing:
                 if child_score > best:
                     best = child_score
@@ -223,6 +295,7 @@ def _alpha_beta(
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
                     history,
+                    q_move_bufs, q_max_depth,
                     move_bufs,
                 )
             else:
@@ -234,6 +307,7 @@ def _alpha_beta(
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
                     history,
+                    q_move_bufs, q_max_depth,
                     move_bufs,
                 )
                 if child_v > alpha and child_v < beta:
@@ -244,6 +318,7 @@ def _alpha_beta(
                         tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                         killers, killers_valid,
                         history,
+                        q_move_bufs, q_max_depth,
                         move_bufs,
                     )
             if child_v > value:
@@ -267,6 +342,7 @@ def _alpha_beta(
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
                     history,
+                    q_move_bufs, q_max_depth,
                     move_bufs,
                 )
             else:
@@ -277,6 +353,7 @@ def _alpha_beta(
                     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                     killers, killers_valid,
                     history,
+                    q_move_bufs, q_max_depth,
                     move_bufs,
                 )
                 if child_v < beta and child_v > alpha:
@@ -287,6 +364,7 @@ def _alpha_beta(
                         tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                         killers, killers_valid,
                         history,
+                        q_move_bufs, q_max_depth,
                         move_bufs,
                     )
             if child_v < value:
@@ -319,7 +397,11 @@ class FastAgentJit:
     Fully JIT'd alpha-beta agent. Same interface as FastAgent.
     """
 
-    def __init__(self, weights: np.ndarray, depth: int):
+    def __init__(
+        self, weights: np.ndarray, depth: int,
+        use_quiescence: bool = True,
+        q_max_depth: int = int(Q_MAX_DEPTH),
+    ):
         self.depth = depth
         self.weights = np.asarray(weights, dtype=np.float32)
         (W1, b1, W2, b2, W3, b3, piece_diff, king_weight) = unpack_weights(self.weights)
@@ -359,6 +441,15 @@ class FastAgentJit:
         # noise that still improves ordering on average. int32 headroom is
         # ~2e9 which depth^2 cutoffs won't realistically saturate.
         self.history = np.zeros((2, 32, 32), dtype=np.int32)
+
+        # Quiescence extension buffers. Effective quiescence plies = 0 when
+        # disabled, else min(q_max_depth, Q_MAX_DEPTH). We still allocate
+        # Q_MAX_DEPTH+1 buffer rows so the JIT signature is type-stable.
+        effective_q = int(q_max_depth) if use_quiescence else 0
+        self.q_max_depth = np.int64(min(effective_q, int(Q_MAX_DEPTH)))
+        self.q_move_bufs = np.zeros(
+            (int(Q_MAX_DEPTH) + 1, 64, MOVE_SLOTS), dtype=np.int8
+        )
 
         self.nodes_evaluated = 0  # kept for interface compatibility
 
@@ -437,6 +528,7 @@ class FastAgentJit:
                             self.tt_best_idx,
                             self.killers, self.killers_valid,
                             self.history,
+                            self.q_move_bufs, self.q_max_depth,
                             self.move_bufs,
                         )
                     else:
@@ -453,6 +545,7 @@ class FastAgentJit:
                             self.tt_best_idx,
                             self.killers, self.killers_valid,
                             self.history,
+                            self.q_move_bufs, self.q_max_depth,
                             self.move_bufs,
                         )
                         if score > alpha and score < beta:
@@ -466,6 +559,7 @@ class FastAgentJit:
                                 self.tt_best_idx,
                                 self.killers, self.killers_valid,
                                 self.history,
+                                self.q_move_bufs, self.q_max_depth,
                                 self.move_bufs,
                             )
                     if score > iter_best_score:

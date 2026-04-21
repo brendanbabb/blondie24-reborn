@@ -45,7 +45,9 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"GPU ref device: {device}", flush=True)
 
-    jit_agent = FastAgentJitAnaconda(w, depth=DEPTH)
+    # Quiescence off: GPU reference does unpruned minimax with no quiescence,
+    # so keeping it on here would produce expected score divergence.
+    jit_agent = FastAgentJitAnaconda(w, depth=DEPTH, use_quiescence=False)
     gpu_agent = BatchGpuAgentAnaconda(w, depth=DEPTH, device=device)
 
     positions = [random_position(rng) for _ in range(N_POS)]

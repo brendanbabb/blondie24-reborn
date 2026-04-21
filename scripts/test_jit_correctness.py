@@ -39,7 +39,9 @@ def main():
     for depth in DEPTHS:
         print(f"=== depth {depth} ===")
         py_agent = FastAgent(weights, depth=depth, use_tt=True)
-        jit_agent = FastAgentJit(weights, depth=depth)
+        # Quiescence off: reference FastAgent has no quiescence, so keeping it on
+        # here would produce expected score divergence and mask real bugs.
+        jit_agent = FastAgentJit(weights, depth=depth, use_quiescence=False)
 
         disagreements = 0
         t_py = 0.0
