@@ -7,17 +7,23 @@ and no backprop — trained entirely by self-play under an evolutionary strategy
 
 > **A note on the name.** "Blondie24" is the screen name used on Zone.com by the 2001 "Anaconda"
 > system (Chellapilla & Fogel 2001), which added a spatial-preprocessing layer on top of the 1999
-> network and reached expert-level (~2045 USCF) play. This repo reimplements the **1999 precursor**:
-> the 32→40→10→1 MLP with a piece-difference bypass and evolvable king weight, trained by pure EP
-> with a fitness signal of tournament wins/draws/losses. The Anaconda follow-up is planned in a
-> separate repo. We kept the catchy name.
+> network and reached expert-level (~2045 USCF) play. Both architectures are implemented here —
+> the **1999 precursor** (32→40→10→1 MLP with piece-diff bypass, 1,743 evolvable weights) and the
+> **2001 Anaconda** (91 sub-board filters → 92→40→10→1 with piece-diff bypass, 5,048 evolvable
+> weights) — trained by pure EP with a fitness signal of tournament wins/draws/losses.
 
 ## Run the paper
 
-One flag reproduces the 1999 config:
+Reproduce the 1999 config:
 
 ```bash
 python -m training.train --preset paper-1999 --generations 250
+```
+
+Reproduce the 2001 Anaconda config:
+
+```bash
+python -m training.train --preset paper-2001 --generations 250
 ```
 
 That's pop=15, 5 games per individual per generation vs. randomly chosen opponents, fixed 4-ply
@@ -88,12 +94,18 @@ This implementation faithfully reproduces the architecture from the original 199
     above counts it.*
 - All evolved via evolutionary programming — none trained by backpropagation
 
-> **Note on the 2001 follow-up paper**: The later "Anaconda" system — which used the screen name
-> "Blondie24" on Zone.com — added a spatial preprocessing (sub-board feature) layer that expanded
-> the input representation, bringing the total to 5,047 weights and reaching expert-level
-> (~2045 USCF) play after ~840 generations. Training still used fixed 4-ply minimax; 6-ply and
-> 8-ply were only used at evaluation time vs. human opponents. That expansion is a planned
-> follow-up in a separate repo.
+> **The 2001 "Anaconda" / Blondie24 system is also implemented here.** It adds a spatial
+> sub-board preprocessor (91 overlapping 3×3…8×8 filter windows feeding the 92→40→10→1 MLP),
+> bringing the total to 5,048 evolvable weights. The 2001 paper reports 5,046; we fold the
+> piece-diff bypass and king weight into the flat evolvable vector (+2). Train it with:
+>
+> ```
+> python -m training.train --preset paper-2001 --generations 250
+> ```
+>
+> Anaconda runs on both CPU (Numba JIT alpha-beta via `search/fast_minimax_jit_anaconda.py`)
+> and CUDA (torch); CPU JIT is currently the faster path on this repo's hardware. The 2001
+> paper reached expert-level (~2045 USCF) play after ~840 generations; budget accordingly.
 
 ---
 
@@ -309,21 +321,22 @@ matter:
 - Smoke tests + correctness tests for every speedup (TT vs no-TT, JIT vs Python)
 - `play/human_vs_ai.py` for playing a loaded checkpoint interactively
 
-### Comparison to the 2001 "Anaconda" / Blondie24 model (planned separate repo)
+### Comparison to the 2001 "Anaconda" / Blondie24 model (also in this repo)
 
-| | 1999 precursor — *this repo* | Anaconda / Blondie24 (2001) — *planned* |
+| | 1999 precursor | Anaconda / Blondie24 (2001) |
 |---|---|---|
-| Input representation | 32 raw squares | spatial preprocessing (2×2 … 10×10 sub-boards) |
-| Total evolvable weights | **1,742–1,743** (paper-count / with-king) | **5,047** |
+| Input representation | 32 raw squares | 91 overlapping sub-board filters (3×3 through 8×8) |
+| Total evolvable weights | **1,743** (1,742 + king) | **5,048** (5,046 + bypass + king) |
 | Training generations reported | ~250 for A-class play | ~840 for expert (~2045 USCF) |
 | Training search depth | 4-ply | 4-ply (same as 1999) |
 | Evaluation search depth | 4-ply | 6-ply and 8-ply vs. humans on Zone.com |
 | Feature learning | none (raw board only) | positional sub-features evolved jointly |
 
-The Anaconda expansion is specifically the *input pre-processor* — the 32→40→10→1 MLP core
-stays the same. The scaffolding in this repo (population, tournament, search, curriculum,
-logging) is designed to be shared with the Anaconda follow-up; the only piece that changes
-is `neural/network.py` and the encoding in `neural/encoding.py`.
+The Anaconda expansion is specifically the *input pre-processor* — the 92→40→10→1 MLP core
+is a near-clone of the 1999 core (the constant-1 channel of the preprocessor output replaces
+the 40 biases of the 1999 fc1, which is how the paper arrives at 5,046). Pick between them at
+the CLI with `--preset paper-1999` or `--preset paper-2001`. Anaconda requires CUDA — the
+Numba CPU path hard-codes the 1999 layer shapes.
 
 ---
 

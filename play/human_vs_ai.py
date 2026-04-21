@@ -10,12 +10,13 @@ Usage:
 import argparse
 import os
 import time
+import numpy as np
 import torch
 from checkers.board import (
     Board, BLACK, WHITE, EMPTY,
     BLACK_PIECE, BLACK_KING, WHITE_PIECE, WHITE_KING,
 )
-from neural.network import CheckersNet
+from neural.network import make_network, architecture_from_weight_count
 from neural.encoding import encode_board
 from search.minimax import make_agent
 from config import SearchConfig, NetworkConfig
@@ -161,7 +162,7 @@ def human_move(board: Board) -> object:
             raise SystemExit("\n  Game aborted.")
 
 
-def _blondie_accepts_draw(network: CheckersNet, board: Board) -> tuple[bool, float]:
+def _blondie_accepts_draw(network, board: Board) -> tuple[bool, float]:
     """
     Decide whether Blondie accepts a draw offer at the current position.
 
@@ -176,10 +177,17 @@ def _blondie_accepts_draw(network: CheckersNet, board: Board) -> tuple[bool, flo
     return blondie_eval <= 0.3, blondie_eval
 
 
-def load_network(checkpoint_path: str, device: str = "cpu") -> CheckersNet:
+def load_network(checkpoint_path: str, device: str = "cpu"):
+    """Load a network from a checkpoint, auto-detecting its architecture."""
     data = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    net = CheckersNet(NetworkConfig())
-    net.set_weight_vector(data["weights"])
+    weights = np.asarray(data["weights"])
+    arch = data.get("architecture")
+    if arch is None:
+        arch = data.get("config", {}).get("network", {}).get("architecture")
+    if arch is None:
+        arch = architecture_from_weight_count(len(weights))
+    net = make_network(NetworkConfig(architecture=arch))
+    net.set_weight_vector(weights)
     return net.to(device)
 
 
@@ -196,8 +204,13 @@ def play(checkpoint: str, depth: int, device: str, human_color: str, max_moves: 
     history: list[str] = []
     state_counts: dict[bytes, int] = {}
 
+    arch_label = {
+        "checkersnet-1999": "1999 CheckersNet (1,743 weights)",
+        "anaconda-2001":    "2001 Anaconda (5,048 weights)",
+    }.get(getattr(network, "config", NetworkConfig()).architecture, "unknown arch")
     print(_paint("\n" + "=" * 60, C.LABEL))
     print(_paint(f"  BLONDIE24 REBORN  |  checkpoint: {os.path.basename(checkpoint)}", C.LABEL + C.BOLD))
+    print(_paint(f"  Architecture: {arch_label}", C.LABEL))
     print(_paint(f"  You are {human_color.upper()}  |  AI depth: {depth}", C.LABEL))
     print(_paint("  b/B = black (Blondie's pieces if you're white)   w/W = white", C.DIM))
     print(_paint("  Capitals are kings.  Numbers mark empty playable squares.", C.DIM))

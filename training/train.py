@@ -262,6 +262,7 @@ def _save_checkpoint(population: Population, config: Config, generation: int):
 
     checkpoint = {
         "generation": generation,
+        "architecture": config.network.architecture,
         "config": {
             "evolution": vars(config.evolution),
             "network": vars(config.network),
@@ -286,7 +287,11 @@ def _save_checkpoint(population: Population, config: Config, generation: int):
         config.training.checkpoint_dir,
         f"best_gen{generation:04d}.pt"
     )
-    torch.save({"weights": best.weights, "sigmas": best.sigmas}, best_path)
+    torch.save({
+        "architecture": config.network.architecture,
+        "weights": best.weights,
+        "sigmas": best.sigmas,
+    }, best_path)
 
 
 def main():
@@ -327,18 +332,27 @@ def main():
                         help="Tournament style: 'random' (paper-faithful: each "
                              "individual plays --games games vs randomly chosen "
                              "opponents) or 'round-robin' (every pair, both colors).")
+    parser.add_argument("--architecture", type=str, default=None,
+                        choices=["checkersnet-1999", "anaconda-2001"],
+                        help="Neural network architecture. 'checkersnet-1999' is the "
+                             "original 1,743-weight net (default). 'anaconda-2001' is "
+                             "the 5,048-weight sub-board-preprocessor net from the "
+                             "2001 paper. Both run on CPU (Numba JIT) and CUDA (torch).")
     parser.add_argument("--preset", type=str, default=None,
-                        choices=["paper-1999"],
+                        choices=["paper-1999", "paper-2001"],
                         help="Named config preset. 'paper-1999' matches Chellapilla "
                              "& Fogel 1999: pop=15, games=5, depth=4, random pairing, "
                              "+1/0/-2 scoring, initial sigma 0.05, no sigma ceiling. "
-                             "Explicit CLI flags still win over the preset.")
+                             "'paper-2001' switches to the Anaconda architecture with "
+                             "the same EP hyperparameters. Explicit CLI flags still "
+                             "win over the preset.")
     args = parser.parse_args()
 
     # Presets fill args the user didn't set explicitly. Applied before resume
     # logic so an explicit preset beats a checkpoint's saved config.
     if args.preset == "paper-1999":
         paper_defaults = {
+            "architecture": "checkersnet-1999",
             "depth": 4,
             "games": 5,
             "loss_score": -2.0,
@@ -351,6 +365,23 @@ def main():
                 setattr(args, attr, val)
         print("  [preset] paper-1999 (Chellapilla & Fogel 1999) — "
               "pop=15, games=5, depth=4, random pairing, +1/0/-2, sigma=0.05, no sigma ceiling")
+    elif args.preset == "paper-2001":
+        paper_defaults = {
+            "architecture": "anaconda-2001",
+            "depth": 4,
+            "games": 5,
+            "loss_score": -2.0,
+            "win_score": 1.0,
+            "initial_sigma": 0.05,
+            "max_sigma": float("inf"),
+        }
+        for attr, val in paper_defaults.items():
+            if getattr(args, attr) is None:
+                setattr(args, attr, val)
+        print("  [preset] paper-2001 (Chellapilla & Fogel 2001 / Anaconda) — "
+              "arch=anaconda-2001, pop=15, games=5, depth=4, random pairing, "
+              "+1/0/-2, sigma=0.05, no sigma ceiling. "
+              "NOTE: paper ran 840 gens for expert strength; default 250 here.")
 
     # === Resume: adopt hyperparameters saved in the checkpoint unless the ===
     # user explicitly overrode them on the CLI. Keeps resumed runs faithful
@@ -376,6 +407,24 @@ def main():
     _fill_from_resume("win_score", "evolution", "win_score", None)
     _fill_from_resume("initial_sigma", "evolution", "initial_sigma", None)
     _fill_from_resume("max_sigma", "evolution", "max_sigma", None)
+
+    # Architecture: prefer an explicit --architecture; otherwise read from
+    # checkpoint (top-level key first, then nested config.network); finally
+    # fall back to inferring from the weight-vector length (legacy checkpoints).
+    if args.architecture is None:
+        if args.resume:
+            ckpt_for_arch = torch.load(args.resume, weights_only=False)
+            arch = ckpt_for_arch.get("architecture")
+            if arch is None:
+                arch = ckpt_for_arch.get("config", {}).get("network", {}).get("architecture")
+            if arch is None:
+                from neural.network import architecture_from_weight_count
+                ind0 = ckpt_for_arch["individuals"][0]
+                arch = architecture_from_weight_count(len(np.asarray(ind0["weights"])))
+                print(f"  [resume] inferred architecture={arch} from weight count")
+            args.architecture = arch
+        else:
+            args.architecture = "checkersnet-1999"
 
     if resumed_cfg:
         print(
@@ -408,6 +457,7 @@ def main():
     config.evolution.population_size = args.population
     config.search.depth = args.depth
     config.evolution.games_per_individual = args.games
+    config.network.architecture = args.architecture
     config.training.device = args.device
     config.training.num_workers = args.workers
     config.training.seed = args.seed

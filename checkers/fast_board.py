@@ -80,7 +80,7 @@ def _build_adjacency_arrays():
 NEIGHBORS, JUMP_TARGETS, DIR_DR = _build_adjacency_arrays()
 
 
-@njit(cache=False)
+@njit(cache=True)
 def _get_jumps_rec(
     squares, sq, player, neighbors, jump_targets, dir_dr,
     path, path_len, out_moves, out_count
@@ -181,7 +181,7 @@ def _get_jumps_rec(
     return out_count
 
 
-@njit(cache=False)
+@njit(cache=True)
 def get_legal_moves_fast(
     squares, current_player, neighbors, jump_targets, dir_dr,
     out_moves
@@ -257,7 +257,7 @@ def get_legal_moves_fast(
     return simple_count
 
 
-@njit(cache=False)
+@njit(cache=True)
 def apply_move_fast(squares, move):
     """
     Apply move to a fresh copy of squares. Returns the new squares array

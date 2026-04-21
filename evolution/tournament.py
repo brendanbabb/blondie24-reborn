@@ -18,14 +18,29 @@ from search.parallel_search import ParallelSearchScheduler
 from config import SearchConfig, EvolutionConfig
 
 
+def _fast_agent_class_for(arch: str):
+    """Return the Numba JIT agent class that matches `arch`."""
+    if arch == "checkersnet-1999":
+        from search.fast_minimax_jit import FastAgentJit
+        return FastAgentJit
+    if arch == "anaconda-2001":
+        from search.fast_minimax_jit_anaconda import FastAgentJitAnaconda
+        return FastAgentJitAnaconda
+    raise ValueError(
+        f"Unknown architecture {arch!r}. Expected 'checkersnet-1999' "
+        f"or 'anaconda-2001'."
+    )
+
+
 def _build_fast_agents(population: Population, search_config: SearchConfig):
     """Pre-build numpy/Numba agents for CPU tournament play.
 
     Numba is imported lazily so environments that can't load the numba
     DLLs (e.g. WDAC-blocked Windows) can still use the torch-based paths.
     """
-    from search.fast_minimax_jit import FastAgentJit
-    return [FastAgentJit(ind.weights, search_config.depth)
+    arch = getattr(population.net_config, "architecture", "checkersnet-1999")
+    AgentCls = _fast_agent_class_for(arch)
+    return [AgentCls(ind.weights, search_config.depth)
             for ind in population.individuals]
 
 
@@ -35,9 +50,20 @@ def _build_fast_agents(population: Population, search_config: SearchConfig):
 # this module, warms JIT on first call, and then chews through games.
 
 def _mp_worker_init():
-    """Warm Numba JIT inside a worker process so the first game isn't slow."""
+    """Warm both Numba JIT paths inside a worker process so the first
+    game of either architecture isn't slow. Warming both is cheap and
+    avoids branching on architecture at init time — the worker pool is
+    shared across both paths within a run.
+    """
     from search.fast_minimax_jit import warmup
     warmup()
+    try:
+        from search.fast_minimax_jit_anaconda import warmup_anaconda
+        warmup_anaconda()
+    except Exception:
+        # If Anaconda JIT can't compile for any reason, the 1999 path is
+        # still usable. Surface the failure lazily on first Anaconda call.
+        pass
 
 
 def _mp_play_one(task):
@@ -46,11 +72,18 @@ def _mp_play_one(task):
         (pair_id, black_weights, white_weights, depth, max_moves)
     Returns (pair_id, winner_int, moves, reason) — a flat picklable tuple.
     winner_int: 1=black, -1=white, 0=draw.
+
+    Architecture is auto-detected from weight-vector length so the task
+    tuple stays small: 1743 -> 1999, 5048 -> Anaconda 2001.
     """
-    from search.fast_minimax_jit import FastAgentJit
+    from neural.network import architecture_from_weight_count
     pair_id, black_w, white_w, depth, max_moves = task
-    black = FastAgentJit(black_w, depth)
-    white = FastAgentJit(white_w, depth)
+    black_arch = architecture_from_weight_count(len(black_w))
+    white_arch = architecture_from_weight_count(len(white_w))
+    BlackCls = _fast_agent_class_for(black_arch)
+    WhiteCls = _fast_agent_class_for(white_arch)
+    black = BlackCls(black_w, depth)
+    white = WhiteCls(white_w, depth)
     result = play_game(black, white, max_moves=max_moves)
     w = result.winner
     winner_int = 0 if w is None else int(w)
@@ -148,7 +181,7 @@ def random_pairing_tournament(
         tasks.append((pair_id, black_w, white_w, depth, max_moves))
 
     for pair_id, winner_int, _n_moves, _reason in pool.imap_unordered(
-        _mp_play_one, tasks, chunksize=2
+        _mp_play_one, tasks, chunksize=8
     ):
         i, opp_idx, i_is_black = pair_map[pair_id]
         player = pop[i]
@@ -239,7 +272,7 @@ def round_robin_tournament(
 
     # Use imap_unordered for slight throughput gain and to surface errors early.
     for pair_id, winner_int, n_moves, reason in pool.imap_unordered(
-        _mp_play_one, tasks, chunksize=2
+        _mp_play_one, tasks, chunksize=8
     ):
         black_idx, white_idx = pair_map[pair_id]
         black = pop[black_idx]
@@ -292,8 +325,13 @@ def parallel_round_robin_tournament(
     scheduler = ParallelSearchScheduler(device)
     # Stack all population weights onto GPU once per gen — lets the scheduler
     # do one batched forward per tick instead of one forward per network.
-    from search.parallel_search import BatchedCheckersNets
-    batched_nets = BatchedCheckersNets(networks, device)
+    arch = getattr(population.net_config, "architecture", "checkersnet-1999")
+    if arch == "anaconda-2001":
+        from search.parallel_search import BatchedAnacondaNets
+        batched_nets = BatchedAnacondaNets(networks, device)
+    else:
+        from search.parallel_search import BatchedCheckersNets
+        batched_nets = BatchedCheckersNets(networks, device)
     depth = search_config.depth
 
     # Build all pairings: every ordered pair (i black, j white), i != j.

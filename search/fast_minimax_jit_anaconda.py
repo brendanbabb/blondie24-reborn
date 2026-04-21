@@ -1,12 +1,16 @@
 """
-Numba-JIT alpha-beta search for Blondie24.
+Numba-JIT alpha-beta search for the 2001 Anaconda network.
 
-Replaces FastAgent's Python recursion with a fully-compiled version. Move gen,
-position encoding, forward pass, TT probe/store, and alpha-beta recursion all
-run as native code — no Python interpreter overhead inside the tree.
+Parallels search/fast_minimax_jit.py but the leaf evaluator runs the
+92 -> 40 -> 10 -> 1 MLP fronted by the 91-filter spatial preprocessor.
 
-Profile after FastAgent+TT showed Python recursion self-time was the dominant
-remaining cost at depth 8. This module eliminates it.
+The dense (91, 32) preprocessor weight matrix is built once in Python
+from the flat 854-weight vector via `unpack_weights_anaconda` — the JIT
+receives an already-scattered ndarray so the hot path stays branch-free.
+
+Zobrist table is shared with the 1999 JIT module so position hashes
+collide across architectures, which is fine because the TT is cleared
+at every search call.
 """
 
 import numpy as np
@@ -21,8 +25,9 @@ from checkers.fast_board import (
     DIR_DR,
     MOVE_SLOTS,
 )
-from neural.fast_eval import unpack_weights
+from neural.fast_eval_anaconda import unpack_weights_anaconda, TOTAL as ANACONDA_TOTAL
 from search.fast_minimax import _py_move_key, _fast_move_key
+from search.fast_minimax_jit import ZOBRIST_PIECES, ZOBRIST_SIDE
 
 
 INF32 = np.float32(np.inf)
@@ -34,23 +39,8 @@ _TT_SIZE = 1 << 20
 _TT_MASK = np.int64(_TT_SIZE - 1)
 
 
-def _build_zobrist():
-    """
-    Zobrist table: 32 squares x 5 piece types (indexed by piece_value + 2).
-    Index 2 (empty) is zero so empty squares contribute nothing.
-    """
-    rng = np.random.default_rng(0xB10ED124)
-    tbl = rng.integers(1, 1 << 62, size=(32, 5), dtype=np.int64)
-    tbl[:, 2] = 0  # empty
-    side = np.int64(rng.integers(1, 1 << 62))
-    return tbl, side
-
-
-ZOBRIST_PIECES, ZOBRIST_SIDE = _build_zobrist()
-
-
 @njit(cache=True, inline='always')
-def _hash_position(squares, player):
+def _hash_position_ana(squares, player):
     h = np.int64(0)
     for sq in range(32):
         idx = np.int64(squares[sq]) + 2
@@ -61,17 +51,15 @@ def _hash_position(squares, player):
 
 
 @njit(cache=True)
-def _eval_position(
+def _eval_position_anaconda(
     squares, player,
-    W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
+    W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
     root_player,
 ):
     """
-    Forward pass on a single position. Returns a float32 score from
-    root_player's perspective.
+    Anaconda forward pass on a single position. Returns a float32 score
+    from root_player's perspective.
     """
-    # Viewpoint encoding: own pieces positive, opponent negative.
-    # Pieces -> +/-1, kings -> +/-king_weight.
     x = np.empty(32, dtype=np.float32)
     pd_sum = np.float32(0.0)
     for i in range(32):
@@ -89,15 +77,24 @@ def _eval_position(
         x[i] = v
         pd_sum += v
 
-    # Layer 1: 32 -> 40 + tanh
+    # Spatial preprocessor: 91 filters + constant-1 bias channel for fc1.
+    filters = np.empty(92, dtype=np.float32)
+    for f in range(91):
+        s = b_pp[f]
+        for k in range(32):
+            s += W_pp[f, k] * x[k]
+        filters[f] = np.float32(np.tanh(s))
+    filters[91] = np.float32(1.0)
+
+    # fc1: 92 -> 40 (no explicit bias; the constant-1 channel carries it)
     h1 = np.empty(40, dtype=np.float32)
     for j in range(40):
-        s = b1[j]
-        for i in range(32):
-            s += W1[j, i] * x[i]
+        s = np.float32(0.0)
+        for i in range(92):
+            s += W1[j, i] * filters[i]
         h1[j] = np.float32(np.tanh(s))
 
-    # Layer 2: 40 -> 10 + tanh
+    # fc2: 40 -> 10
     h2 = np.empty(10, dtype=np.float32)
     for j in range(10):
         s = b2[j]
@@ -105,38 +102,35 @@ def _eval_position(
             s += W2[j, i] * h1[i]
         h2[j] = np.float32(np.tanh(s))
 
-    # Layer 3: 10 -> 1
+    # fc3: 10 -> 1
     s3 = b3[0]
     for i in range(10):
         s3 += W3[0, i] * h2[i]
 
     score = np.float32(np.tanh(s3 + pd_sum * piece_diff))
-
     if player != root_player:
         score = -score
     return score
 
 
 @njit(cache=True)
-def _alpha_beta(
+def _alpha_beta_anaconda(
     squares, player, depth, alpha, beta, maximizing, root_player,
-    W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
+    W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
     tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
     move_bufs,
 ):
     buf = move_bufs[depth]
     n_moves = get_legal_moves_fast(
-        squares, player, NEIGHBORS, JUMP_TARGETS, DIR_DR, buf
+        squares, player, NEIGHBORS, JUMP_TARGETS, DIR_DR, buf,
     )
     if n_moves == 0:
-        # Current player has no legal moves -> loses
         winner = -player
         if winner == root_player:
             return INF32
         else:
             return -INF32
 
-    # ── Leaf level: expand one more ply and eval each child ──
     if depth == 1:
         next_player = -player
         if maximizing:
@@ -147,19 +141,18 @@ def _alpha_beta(
             new_sq = apply_move_fast(squares, buf[i])
             gc_buf = move_bufs[0]
             gc_count = get_legal_moves_fast(
-                new_sq, next_player, NEIGHBORS, JUMP_TARGETS, DIR_DR, gc_buf
+                new_sq, next_player, NEIGHBORS, JUMP_TARGETS, DIR_DR, gc_buf,
             )
             if gc_count == 0:
-                # Child (next_player) has no moves -> player wins
                 winner = player
                 if winner == root_player:
                     child_score = INF32
                 else:
                     child_score = -INF32
             else:
-                child_score = _eval_position(
+                child_score = _eval_position_anaconda(
                     new_sq, next_player,
-                    W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
+                    W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
                     root_player,
                 )
             if maximizing:
@@ -170,8 +163,7 @@ def _alpha_beta(
                     best = child_score
         return best
 
-    # ── Interior node: TT probe ──
-    key = _hash_position(squares, player)
+    key = _hash_position_ana(squares, player)
     slot = np.int64(key) & _TT_MASK
     tt_move = np.int8(-1)
     if tt_keys[slot] == key:
@@ -186,8 +178,6 @@ def _alpha_beta(
             if f == _TT_UPPER and v <= alpha:
                 return v
 
-    # Move ordering: swap the TT-suggested best move into slot 0 so the
-    # most-likely-best child is searched first, maximizing alpha-beta cutoffs.
     swapped = False
     if tt_move > 0 and tt_move < n_moves:
         for k in range(MOVE_SLOTS):
@@ -205,10 +195,10 @@ def _alpha_beta(
         value = -INF32
         for i in range(n_moves):
             new_sq = apply_move_fast(squares, buf[i])
-            child_v = _alpha_beta(
+            child_v = _alpha_beta_anaconda(
                 new_sq, next_player, depth - 1,
                 alpha, beta, False, root_player,
-                W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
+                W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
                 tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                 move_bufs,
             )
@@ -223,10 +213,10 @@ def _alpha_beta(
         value = INF32
         for i in range(n_moves):
             new_sq = apply_move_fast(squares, buf[i])
-            child_v = _alpha_beta(
+            child_v = _alpha_beta_anaconda(
                 new_sq, next_player, depth - 1,
                 alpha, beta, True, root_player,
-                W1, b1, W2, b2, W3, b3, piece_diff, king_weight,
+                W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight,
                 tt_keys, tt_value, tt_depth, tt_flag, tt_best_idx,
                 move_bufs,
             )
@@ -238,16 +228,12 @@ def _alpha_beta(
             if alpha >= beta:
                 break
 
-    # ── TT store ──
     if value <= alpha0:
         flag = _TT_UPPER
     elif value >= beta0:
         flag = _TT_LOWER
     else:
         flag = _TT_EXACT
-    # Translate post-swap best_idx back to the canonical move-list order so
-    # the next visit (which re-derives the canonical order from move-gen)
-    # still points at the same physical move.
     canonical_best = best_idx
     if swapped:
         if best_idx == 0:
@@ -263,17 +249,20 @@ def _alpha_beta(
     return value
 
 
-class FastAgentJit:
+class FastAgentJitAnaconda:
     """
-    Fully JIT'd alpha-beta agent. Same interface as FastAgent.
+    JIT'd alpha-beta agent for the 2001 Anaconda network. Same public
+    interface as FastAgentJit.
     """
 
     def __init__(self, weights: np.ndarray, depth: int):
         self.depth = depth
         self.weights = np.asarray(weights, dtype=np.float32)
-        (W1, b1, W2, b2, W3, b3, piece_diff, king_weight) = unpack_weights(self.weights)
+        (W_pp, b_pp, W1, W2, b2, W3, b3, piece_diff, king_weight) = \
+            unpack_weights_anaconda(self.weights)
+        self.W_pp = np.ascontiguousarray(W_pp, dtype=np.float32)
+        self.b_pp = np.ascontiguousarray(b_pp, dtype=np.float32)
         self.W1 = np.ascontiguousarray(W1, dtype=np.float32)
-        self.b1 = np.ascontiguousarray(b1, dtype=np.float32)
         self.W2 = np.ascontiguousarray(W2, dtype=np.float32)
         self.b2 = np.ascontiguousarray(b2, dtype=np.float32)
         self.W3 = np.ascontiguousarray(W3, dtype=np.float32)
@@ -281,21 +270,15 @@ class FastAgentJit:
         self.piece_diff = np.float32(piece_diff)
         self.king_weight = np.float32(king_weight)
 
-        # Move buffers: slot 0 is scratch for terminal checks at the leaf
-        # level; slots 1..depth-1 are the per-depth buffers used during
-        # recursion. We never call _alpha_beta at depth >= self.depth
-        # (root calls with depth = self.depth - 1), but allocate self.depth
-        # slots to cover it safely.
         self.move_bufs = np.zeros((depth + 1, 64, MOVE_SLOTS), dtype=np.int8)
 
-        # Transposition table
         self.tt_keys     = np.zeros(_TT_SIZE, dtype=np.int64)
         self.tt_value    = np.zeros(_TT_SIZE, dtype=np.float32)
         self.tt_depth    = np.full(_TT_SIZE, -1, dtype=np.int8)
         self.tt_flag     = np.zeros(_TT_SIZE, dtype=np.int8)
         self.tt_best_idx = np.full(_TT_SIZE, -1, dtype=np.int8)
 
-        self.nodes_evaluated = 0  # kept for interface compatibility
+        self.nodes_evaluated = 0
 
     def search(self, board: Board):
         py_moves = board.get_legal_moves()
@@ -304,11 +287,8 @@ class FastAgentJit:
         if len(py_moves) == 1:
             return py_moves[0], 0.0
 
-        # Invalidate TT each search: entries are keyed on (squares, player)
-        # but values are relative to root_player, which flips across calls.
         self.tt_depth.fill(-1)
 
-        # Get fast moves for the root
         root_buf = np.zeros((64, MOVE_SLOTS), dtype=np.int8)
         n_root = get_legal_moves_fast(
             board.squares, board.current_player,
@@ -330,10 +310,10 @@ class FastAgentJit:
             py_move = py_by_key[key]
 
             new_sq = apply_move_fast(board.squares, fast_move)
-            score = _alpha_beta(
+            score = _alpha_beta_anaconda(
                 new_sq, next_player, np.int64(self.depth - 1),
                 alpha, beta, False, root_player,
-                self.W1, self.b1, self.W2, self.b2, self.W3, self.b3,
+                self.W_pp, self.b_pp, self.W1, self.W2, self.b2, self.W3, self.b3,
                 self.piece_diff, self.king_weight,
                 self.tt_keys, self.tt_value, self.tt_depth, self.tt_flag,
                 self.tt_best_idx,
@@ -352,10 +332,10 @@ class FastAgentJit:
         return move
 
 
-def warmup():
-    """Compile the JIT alpha-beta function with a tiny run."""
-    weights = np.zeros(1743, dtype=np.float32)
-    weights[0] = 0.5   # piece_diff
-    weights[1] = 2.0   # king_weight
-    agent = FastAgentJit(weights, depth=3)
+def warmup_anaconda():
+    """Compile the Anaconda JIT alpha-beta function with a tiny run."""
+    weights = np.zeros(ANACONDA_TOTAL, dtype=np.float32)
+    weights[-2] = 0.5   # piece_diff
+    weights[-1] = 2.0   # king_weight
+    agent = FastAgentJitAnaconda(weights, depth=3)
     agent.search(Board())

@@ -128,3 +128,39 @@ class CheckersNet(nn.Module):
         new_net = CheckersNet(self.config)
         new_net.set_weight_vector(self.get_weight_vector())
         return new_net
+
+
+def make_network(config: NetworkConfig = NetworkConfig()):
+    """Build the network class identified by config.architecture.
+
+    Returns a fresh nn.Module instance. The returned object always
+    exposes the same public methods (forward, evaluate_board,
+    get_weight_vector, set_weight_vector, num_weights, copy), so the
+    evolution loop and checkpoint machinery don't need to care which
+    architecture came back.
+    """
+    arch = getattr(config, "architecture", "checkersnet-1999")
+    if arch == "checkersnet-1999":
+        return CheckersNet(config)
+    if arch == "anaconda-2001":
+        from neural.anaconda_network import AnacondaNet
+        return AnacondaNet(config)
+    raise ValueError(
+        f"Unknown architecture {arch!r}. Expected 'checkersnet-1999' or 'anaconda-2001'."
+    )
+
+
+def architecture_from_weight_count(n: int) -> str:
+    """Infer architecture from a flat weight vector's length.
+
+    Used as a last-resort fallback when loading a checkpoint that
+    predates the 'architecture' tag. 1,743 -> 1999, 5,048 -> 2001.
+    """
+    if n == 1743:
+        return "checkersnet-1999"
+    if n == 5048:
+        return "anaconda-2001"
+    raise ValueError(
+        f"Cannot infer architecture from weight count {n} "
+        f"(expected 1743 for 1999 or 5048 for Anaconda)."
+    )

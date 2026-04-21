@@ -7,7 +7,7 @@ and the best μ individuals from parents + offspring survive.
 
 import numpy as np
 from evolution.strategy import Individual, initialize_individual, mutate
-from neural.network import CheckersNet
+from neural.network import make_network
 from config import EvolutionConfig, NetworkConfig
 
 
@@ -15,30 +15,30 @@ class Population:
     """
     Manages the evolving population of checkers-playing neural networks.
     """
-    
+
     def __init__(self, config: EvolutionConfig, net_config: NetworkConfig = NetworkConfig()):
         self.config = config
         self.net_config = net_config
-        
+
         # Determine number of weights from a reference network
-        ref_net = CheckersNet(net_config)
+        ref_net = make_network(net_config)
         self.n_weights = ref_net.num_weights()
-        
+
         # Initialize population
         self.individuals: list[Individual] = [
             initialize_individual(self.n_weights, config)
             for _ in range(config.population_size)
         ]
-        
+
         self.generation = 0
-    
-    def get_network(self, individual: Individual, device: str = "cpu") -> CheckersNet:
-        """Create a CheckersNet from an individual's weight vector."""
-        net = CheckersNet(self.net_config)
+
+    def get_network(self, individual: Individual, device: str = "cpu"):
+        """Build a network with this individual's weight vector, on `device`."""
+        net = make_network(self.net_config)
         net.set_weight_vector(individual.weights)
         net = net.to(device)
         return net
-    
+
     def load_checkpoint(self, path: str):
         """Replace individuals + generation counter from a saved checkpoint."""
         import torch

@@ -224,6 +224,90 @@ class BatchedCheckersNets:
         return torch.tanh(out + bypass).squeeze(-1)
 
 
+class BatchedAnacondaNets:
+    """
+    Batched-GPU mirror of BatchedCheckersNets for the 2001 Anaconda
+    architecture. Same forward signature (x, net_idx) -> (B,), so
+    ParallelSearchScheduler.run_batched can use either one.
+
+    Stacks per-population-member parameters:
+      pp_weights: (N, 854)       — live preprocessor weights (flat)
+      pp_bias:    (N, 91)        — preprocessor filter biases
+      W1:         (N, 40, 92)    — fc1 (no bias; constant-1 channel handles it)
+      W2:         (N, 10, 40)
+      b2:         (N, 10)
+      W3:         (N, 1, 10)
+      b3:         (N, 1)
+      piece_diff: (N,)
+
+    The scatter indices are architecture-invariant (same for every
+    member of the population), so they're stored once as a buffer.
+    """
+
+    def __init__(self, networks, device: torch.device):
+        from neural.anaconda_windows import N_FILTERS, N_PP_WEIGHTS, scatter_indices
+
+        self.device = device
+        self.n_networks = len(networks)
+        self.n_filters = N_FILTERS
+        self.n_pp_weights = N_PP_WEIGHTS
+
+        self.pp_weights = torch.stack([n.pp_weights.data for n in networks]).to(device)
+        self.pp_bias    = torch.stack([n.pp_bias.data    for n in networks]).to(device)
+        self.W1 = torch.stack([n.fc1.weight.data for n in networks]).to(device)  # (N, 40, 92)
+        self.W2 = torch.stack([n.fc2.weight.data for n in networks]).to(device)  # (N, 10, 40)
+        self.b2 = torch.stack([n.fc2.bias.data   for n in networks]).to(device)
+        self.W3 = torch.stack([n.fc3.weight.data for n in networks]).to(device)  # (N, 1, 10)
+        self.b3 = torch.stack([n.fc3.bias.data   for n in networks]).to(device)
+        self.piece_diff = torch.stack(
+            [n.piece_diff_weight.data.reshape(1) for n in networks]
+        ).to(device).squeeze(-1)
+
+        self.scatter_idx = scatter_indices().to(device)  # (854,)
+
+        # Pre-materialize the dense stacked preprocessor weights (N, 91, 32).
+        # Only depends on pp_weights; rebuilt once per generation when a new
+        # BatchedAnacondaNets is constructed. For per-tick forward passes
+        # we reuse this tensor (it's constant across the generation).
+        self.W_pp = self._build_dense_pp()
+
+    def _build_dense_pp(self) -> torch.Tensor:
+        N = self.n_networks
+        dense = torch.zeros(
+            N, self.n_filters * 32,
+            device=self.device, dtype=self.pp_weights.dtype,
+        )
+        idx = self.scatter_idx.unsqueeze(0).expand(N, self.n_pp_weights)
+        dense.scatter_(1, idx, self.pp_weights)
+        return dense.view(N, self.n_filters, 32)  # (N, 91, 32)
+
+    def forward(self, x: torch.Tensor, net_idx: torch.Tensor) -> torch.Tensor:
+        """
+        x:       (B, 32) float tensor on self.device
+        net_idx: (B,)    long tensor of population indices on self.device
+        returns: (B,)    float tensor of evaluation scores in [-1, 1]
+        """
+        W_pp = self.W_pp.index_select(0, net_idx)           # (B, 91, 32)
+        b_pp = self.pp_bias.index_select(0, net_idx)        # (B, 91)
+
+        filters = torch.tanh(torch.bmm(W_pp, x.unsqueeze(-1)).squeeze(-1) + b_pp)
+        ones = torch.ones(filters.shape[0], 1, device=self.device, dtype=x.dtype)
+        pp_out = torch.cat([filters, ones], dim=-1)          # (B, 92)
+
+        W1 = self.W1.index_select(0, net_idx)   # (B, 40, 92)
+        W2 = self.W2.index_select(0, net_idx)   # (B, 10, 40)
+        b2 = self.b2.index_select(0, net_idx)   # (B, 10)
+        W3 = self.W3.index_select(0, net_idx)   # (B, 1, 10)
+        b3 = self.b3.index_select(0, net_idx)   # (B, 1)
+        pd = self.piece_diff.index_select(0, net_idx)  # (B,)
+
+        h1 = torch.tanh(torch.bmm(W1, pp_out.unsqueeze(-1)).squeeze(-1))          # no bias on fc1
+        h2 = torch.tanh(torch.bmm(W2, h1.unsqueeze(-1)).squeeze(-1) + b2)
+        out = torch.bmm(W3, h2.unsqueeze(-1)).squeeze(-1) + b3                    # (B, 1)
+        bypass = x.sum(dim=-1, keepdim=True) * pd.unsqueeze(-1)
+        return torch.tanh(out + bypass).squeeze(-1)
+
+
 class ParallelSearchScheduler:
     """
     Drives many ab_search_gen instances in lockstep, batching their

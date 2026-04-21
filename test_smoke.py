@@ -100,6 +100,44 @@ assert len(pop.individuals) == 4
 assert pop.generation == 1
 print(f"OK — generation {pop.generation}, pop size {len(pop.individuals)}")
 
+# -- Test A: Anaconda architecture (2001 paper) --
+print("Test A: AnacondaNet (2001)...", end=" ")
+from neural.anaconda_network import AnacondaNet
+from neural.anaconda_windows import N_FILTERS, N_PP_WEIGHTS, WINDOWS
+from neural.network import make_network, architecture_from_weight_count
+
+assert N_FILTERS == 91
+assert N_PP_WEIGHTS == 854
+assert sum(len(w) for w in WINDOWS) == 854
+
+anet = AnacondaNet()
+assert anet.num_weights() == 5048
+w = anet.get_weight_vector()
+assert len(w) == 5048
+
+# Round-trip with random weights
+rng = np.random.default_rng(1)
+w_rand = rng.standard_normal(5048).astype(np.float32) * 0.1
+anet.set_weight_vector(w_rand)
+w2 = anet.get_weight_vector()
+assert np.allclose(w_rand, w2, atol=1e-6), "Anaconda weight roundtrip failed"
+
+# Forward pass
+score = anet.evaluate_board(encoding)
+assert -1.0 <= score <= 1.0
+print(f"OK — 91 filters, 854 pp-weights, 5048 total, eval={score:.4f}")
+
+# -- Test B: Factory + weight-count inference --
+print("Test B: make_network + arch inference...", end=" ")
+from config import NetworkConfig as _NetCfg
+net1999 = make_network(_NetCfg(architecture="checkersnet-1999"))
+net2001 = make_network(_NetCfg(architecture="anaconda-2001"))
+assert net1999.num_weights() == 1743
+assert net2001.num_weights() == 5048
+assert architecture_from_weight_count(1743) == "checkersnet-1999"
+assert architecture_from_weight_count(5048) == "anaconda-2001"
+print("OK")
+
 # -- Test 9: Play a short game --
 print("Test 9: Play a quick game (random vs random, max 20 moves)...", end=" ")
 from checkers.game import play_game
@@ -111,6 +149,46 @@ def random_agent(b):
 
 result = play_game(random_agent, random_agent, max_moves=20)
 print(f"OK — {result.moves} moves, result: {result.reason}")
+
+# -- Test C: Anaconda JIT agent vs PyTorch forward parity + short game --
+print("Test C: Anaconda JIT forward pass parity + quick game...", end=" ")
+from neural.fast_eval_anaconda import (
+    TOTAL as ANA_TOTAL, unpack_weights_anaconda, forward_batch_anaconda,
+)
+from search.fast_minimax_jit_anaconda import (
+    FastAgentJitAnaconda, warmup_anaconda,
+)
+
+rng_c = np.random.default_rng(17)
+w_ana = rng_c.standard_normal(ANA_TOTAL).astype(np.float32) * 0.1
+anet.set_weight_vector(w_ana)
+
+# PyTorch reference score from the raw 32-vector encoding.
+enc_np = np.asarray(encoding, dtype=np.float32).reshape(1, 32)
+W_pp, b_pp, W1, W2, b2, W3, b3, pd, kw = unpack_weights_anaconda(w_ana)
+np_score = float(forward_batch_anaconda(enc_np, W_pp, b_pp, W1, W2, b2, W3, b3, pd)[0])
+torch_score = float(anet.evaluate_board(encoding))
+assert abs(np_score - torch_score) < 1e-4, (
+    f"Anaconda numpy vs torch diverged: {np_score} vs {torch_score}"
+)
+
+# Warm + play one game: JIT agent vs random, max 40 moves.
+warmup_anaconda()
+jit_black = FastAgentJitAnaconda(w_ana, depth=2)
+result_c = play_game(jit_black, random_agent, max_moves=40)
+print(
+    f"OK — np/torch diff={abs(np_score - torch_score):.2e}, "
+    f"{result_c.moves} moves, result: {result_c.reason}"
+)
+
+# -- Test D: 1999 vs Anaconda dispatch via _fast_agent_class_for --
+print("Test D: tournament fast-agent dispatch...", end=" ")
+from evolution.tournament import _fast_agent_class_for
+from search.fast_minimax_jit import FastAgentJit
+
+assert _fast_agent_class_for("checkersnet-1999") is FastAgentJit
+assert _fast_agent_class_for("anaconda-2001") is FastAgentJitAnaconda
+print("OK")
 
 print("\n" + "=" * 50)
 print("  ALL SMOKE TESTS PASSED")

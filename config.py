@@ -24,15 +24,20 @@ class NetworkConfig:
     hidden1_size: int = 40      # first hidden layer
     hidden2_size: int = 10      # second hidden layer
     output_size: int = 1        # single board evaluation score
-    
+
     # King weight: how much more a king is worth vs a regular piece in the encoding.
     # This is ALSO an evolvable parameter in the original paper.
     # Fogel 1999: initialized at K=2.0, constrained to range [1, 3].
     initial_king_weight: float = 2.0
-    
+
     # Activation functions (Fogel 1999 used tanh throughout)
     hidden_activation: str = "tanh"
     output_activation: str = "tanh"     # output in [-1, 1]
+
+    # Which network to build. "checkersnet-1999" is the 1999 paper net
+    # (1,743 evolvable weights). "anaconda-2001" adds the spatial sub-board
+    # preprocessor from the 2001 paper (5,048 evolvable weights).
+    architecture: str = "checkersnet-1999"
 
 
 @dataclass
