@@ -411,6 +411,17 @@ body.human-black #pieces-panel .pip-ai  { background: #e8e8e8; border-color: #88
 
 #pieces-panel .piece-row.low .count { color: #ff8a50; }
 
+/* Layered architecture view */
+#layers-panel canvas {
+  display: block;
+  margin: 8px auto 0;
+  background: var(--panel-2);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--border);
+  max-width: 100%;
+  height: auto;
+}
+
 /* Full-network x-ray + diff */
 #xray-panel .xray-row {
   display: flex;

@@ -158,6 +158,21 @@
         </ol>
       </div>
 
+      <div class="panel" id="layers-panel">
+        <h2>Network architecture</h2>
+        <p class="legend">
+          The current champion's 4 layers as a graph:
+          <b>32</b> input squares → <b>40</b> → <b>10</b> → <b>1</b> output.
+          The <b>40 strongest</b> connections per layer are drawn, colored by
+          sign (<b style="color:#ff9a8a">red</b> negative,
+          <b style="color:#7fb8ff">blue</b> positive).
+        </p>
+        <canvas id="layers" width="340" height="240"></canvas>
+        <p class="dim" id="layers-caption" style="margin: 6px 0 0; text-align: center;">
+          waiting for the AI's first move…
+        </p>
+      </div>
+
       <div class="panel" id="xray-panel">
         <h2>Network x-ray &amp; evolution drift</h2>
         <p class="legend">

@@ -282,6 +282,120 @@
       captionText.replace("{norm}", norm.toPrecision(2));
   }
 
+  // Layered architecture view. Draws the network as 4 columns of nodes
+  // (32 → 40 → 10 → 1) with the top-K strongest connections per layer drawn
+  // as lines. Same diverging palette: red negative, blue positive.
+  function renderLayeredNetwork(gen, weights) {
+    const canvas = document.getElementById("layers");
+    const g = canvas.getContext("2d");
+    const W = canvas.width;
+    const H = canvas.height;
+
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = "#1f242f";
+    g.fillRect(0, 0, W, H);
+
+    // Layer offsets into the flat weights buffer (see network.js for the layout).
+    const OFF_W1 = 0;
+    const OFF_W2 = 0 + 32 * 40 + 40;     // past W1 + b1
+    const OFF_W3 = OFF_W2 + 40 * 10 + 10; // past W2 + b2
+    const LAYERS = [
+      { count: 32, x: 28,  yTop: 14,  yBot: H - 14 },
+      { count: 40, x: 125, yTop: 6,   yBot: H - 6  },
+      { count: 10, x: 225, yTop: 30,  yBot: H - 30 },
+      { count: 1,  x: 315, yTop: H/2, yBot: H/2    },
+    ];
+
+    function nodeY(layer, i) {
+      if (layer.count === 1) return H / 2;
+      return layer.yTop + i * (layer.yBot - layer.yTop) / (layer.count - 1);
+    }
+
+    // Helper: draw a slab of connections. `matrix` is a function giving the
+    // weight for (dst, src). We pick the top-K by absolute magnitude and draw
+    // them with color and alpha scaled to magnitude.
+    function drawLayer(fromIdx, toIdx, matrix, topK) {
+      const layerFrom = LAYERS[fromIdx];
+      const layerTo = LAYERS[toIdx];
+      const entries = [];
+      for (let d = 0; d < layerTo.count; d++) {
+        for (let s = 0; s < layerFrom.count; s++) {
+          entries.push({ s, d, w: matrix(d, s) });
+        }
+      }
+      entries.sort((a, b) => Math.abs(b.w) - Math.abs(a.w));
+      const keep = entries.slice(0, topK);
+      const normAbs = Math.max(1e-6, Math.abs(keep[0] ? keep[0].w : 1));
+
+      // Draw in magnitude order so strongest lines render on top.
+      keep.reverse();
+      for (const e of keep) {
+        const t = Math.max(-1, Math.min(1, e.w / normAbs));
+        const a = Math.abs(t);
+        const x1 = layerFrom.x + 4;
+        const y1 = nodeY(layerFrom, e.s);
+        const x2 = layerTo.x - 4;
+        const y2 = nodeY(layerTo, e.d);
+        g.beginPath();
+        g.moveTo(x1, y1);
+        g.lineTo(x2, y2);
+        const rgb = t < 0 ? `255,60,60` : `80,170,255`;
+        g.strokeStyle = `rgba(${rgb},${(0.15 + 0.7 * a).toFixed(3)})`;
+        g.lineWidth = 0.5 + 1.8 * a;
+        g.stroke();
+      }
+    }
+
+    // Layer 1 → Layer 2: W1 is [40 × 32] row-major.
+    drawLayer(0, 1, (d, s) => weights[OFF_W1 + d * 32 + s], 40);
+    // Layer 2 → Layer 3: W2 is [10 × 40] row-major.
+    drawLayer(1, 2, (d, s) => weights[OFF_W2 + d * 40 + s], 40);
+    // Layer 3 → Layer 4: W3 is [1 × 10].
+    drawLayer(2, 3, (d, s) => weights[OFF_W3 + s], 10);
+
+    // Piece-diff bypass — draw a single soft curve from the input column's
+    // centroid to the output, labeled, so the paper's "material signal" is
+    // visible at a glance.
+    const OFF_PIECE_DIFF = OFF_W3 + 10 + 1; // past W3 + b3
+    const pd = weights[OFF_PIECE_DIFF];
+    const pdA = Math.min(1, Math.abs(pd) / 0.5);
+    g.beginPath();
+    g.moveTo(LAYERS[0].x + 4, H / 2);
+    g.bezierCurveTo(W * 0.4, H * 0.2, W * 0.7, H * 0.8, LAYERS[3].x - 4, H / 2);
+    const pdRgb = pd < 0 ? `255,150,80` : `120,220,200`;
+    g.strokeStyle = `rgba(${pdRgb},${(0.25 + 0.6 * pdA).toFixed(3)})`;
+    g.lineWidth = 1 + 2 * pdA;
+    g.stroke();
+
+    // Nodes, drawn on top.
+    for (let li = 0; li < LAYERS.length; li++) {
+      const layer = LAYERS[li];
+      const r = li === 3 ? 6 : 2.6;
+      for (let i = 0; i < layer.count; i++) {
+        g.beginPath();
+        g.arc(layer.x, nodeY(layer, i), r, 0, Math.PI * 2);
+        g.fillStyle = "#e6ecf3";
+        g.fill();
+        g.strokeStyle = "rgba(0,0,0,0.5)";
+        g.lineWidth = 1;
+        g.stroke();
+      }
+    }
+
+    // Column labels.
+    g.fillStyle = "rgba(200,210,225,0.75)";
+    g.font = "10px -apple-system, Segoe UI, sans-serif";
+    g.textAlign = "center";
+    g.fillText("32 in",  LAYERS[0].x, H - 2);
+    g.fillText("40",     LAYERS[1].x, H - 2);
+    g.fillText("10",     LAYERS[2].x, H - 2);
+    g.fillText("out",    LAYERS[3].x, H - 2);
+    g.textAlign = "start";
+
+    document.getElementById("layers-caption").textContent =
+      `gen ${gen} · 3 dense layers + piece-diff bypass · top-40 edges drawn per slab`;
+  }
+
   function renderNetworkXray(gen, weights) {
     paintWeightGrid(
       "xray", weights,
@@ -393,6 +507,14 @@
     }
     document.getElementById("xray-caption").textContent = "weights — awaiting first move…";
     document.getElementById("xray-diff-caption").textContent = "drift — awaiting second move…";
+    // Clear the layered-architecture view.
+    const layersCanvas = document.getElementById("layers");
+    if (layersCanvas) {
+      const lg = layersCanvas.getContext("2d");
+      lg.fillStyle = "#1f242f";
+      lg.fillRect(0, 0, layersCanvas.width, layersCanvas.height);
+      document.getElementById("layers-caption").textContent = "waiting for the AI's first move…";
+    }
     renderHistoryChart();
 
     // Send the worker back to gen 0 for a fresh run.
@@ -685,6 +807,7 @@
       state.aiNet = N.makeNetwork(snap.weights);
       log(`AI is moving (gen ${snap.gen})…`);
       renderNetworkXray(snap.gen, snap.weights);
+      renderLayeredNetwork(snap.gen, snap.weights);
       updatePosEval();
       const searchStart = performance.now();
       const result = M.pickMove(state.board, AI_DEPTH, state.aiNet);
