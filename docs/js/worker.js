@@ -30,7 +30,7 @@ const M = self.Minimax;
 
 // Demo-tuned EP hyperparameters — smaller than paper for browser responsiveness.
 const POP_SIZE = 6;
-const GAMES_PER_INDIVIDUAL = 2;   // paper uses 5; 2 is minimal-but-workable — fewer games per gen -> more gens/sec
+const GAMES_PER_INDIVIDUAL = 3;   // paper uses 5; 3 gives reasonable ranking at pop=6
 // Adaptive training depth. Openings have wide branching and shallow search is
 // enough to rank networks; endgames have narrow branching but require more
 // plies to actually convert material into wins — at a flat depth 3 most

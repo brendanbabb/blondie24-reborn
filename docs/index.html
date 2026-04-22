@@ -20,18 +20,19 @@
         endgame database, and no backpropagation — only self-play under an
         evolutionary strategy. <a href="https://github.com/brendanbabb/blondie24-reborn" target="_blank" rel="noreferrer">Source on GitHub</a>.
       </p>
-      <p><b>Every AI turn, here's what happens in roughly two seconds:</b></p>
+      <p><b>Every AI turn, here's what happens in roughly three seconds:</b></p>
       <ol>
-        <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>2 self-play games</b> against random opponents from the group. Training search goes <b>3 plies deep</b> (shallower than the 4-ply search the AI uses against you — keeps training fast).</li>
+        <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>3 self-play games</b> against random opponents from the group. Training search goes <b>3 plies deep</b> — deeper (<b>5 plies</b>) once the endgame kicks in (≤ 6 total pieces), so winning king-up positions actually get converted instead of shuffling to a draw.</li>
         <li>Games are scored <b>+1 win / 0 draw / −2 loss</b> (paper's asymmetric scoring). The top 3 networks survive; the bottom 3 are replaced by <b>Gaussian-mutated offspring</b> of the survivors.</li>
-        <li>That's <b>one generation</b>. The browser runs as many gens as fit into those two seconds — typically 4–12 at these settings.</li>
+        <li>That's <b>one generation</b>. The browser runs as many gens as fit into those three seconds — typically 6–15 at these settings.</li>
         <li>Time's up. The current <b>top-ranked network</b> runs depth-4 minimax from the board you see and plays a move. The snapshot is frozen — it doesn't change while you think.</li>
       </ol>
       <p>
         Evolution is paused during your turn, so the AI you face at any point was the fittest
         in the last-completed tournament. Across ~30 AI turns in a game, the population runs
         through <b>~150–300 generations</b> — a substantial fraction of what the paper used to
-        reach Class-A play. Watch the generation counter climb and the network x-ray shift.
+        reach Class-A play. Watch the generation counter climb and the
+        network-architecture panel's connections shift as evolution reshapes the weights.
       </p>
     </details>
   </header>
@@ -150,7 +151,7 @@
       <div class="panel" id="leaderboard-panel">
         <h2>Self-play leaderboard</h2>
         <p class="legend">
-          6 networks · 2 games each per generation ·
+          6 networks · 3 games each per generation ·
           <b>+1</b> win / <b>0</b> draw / <b>−2</b> loss (paper scoring).
         </p>
         <ol id="leaderboard">
