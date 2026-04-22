@@ -402,17 +402,37 @@ body.human-black #pieces-panel .pip-ai  { background: #e8e8e8; border-color: #88
 
 #pieces-panel .piece-row.low .count { color: #ff8a50; }
 
-/* Full-network x-ray */
+/* Full-network x-ray + diff */
+#xray-panel .xray-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: flex-start;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+#xray-panel .xray-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
 #xray-panel canvas {
   display: block;
-  margin: 8px auto 0;
-  width: 210px;
-  height: 210px;
+  width: 140px;
+  height: 140px;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   background: var(--panel-2);
   border-radius: 4px;
   box-shadow: 0 0 0 1px var(--border);
+}
+#xray-panel .xray-caption {
+  font-size: 11px;
+  margin: 0;
+  max-width: 150px;
+  text-align: center;
+  line-height: 1.3;
 }
 
 /* Eval bar */

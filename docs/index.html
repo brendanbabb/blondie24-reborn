@@ -149,16 +149,24 @@
       </div>
 
       <div class="panel" id="xray-panel">
-        <h2>Current network x-ray</h2>
+        <h2>Network x-ray &amp; evolution diff</h2>
         <p class="legend">
-          All <b>1,743</b> weights of the latest AI-moving network, rendered
-          one weight per pixel (42×42 grid). Same diverging palette —
-          <b style="color:#ff9a8a">red</b> negative, <b style="color:#7fb8ff">blue</b> positive.
+          <b>Left:</b> all 1,743 weights of the latest AI-moving network, one
+          per pixel. <b>Right:</b> the difference from the previous AI turn —
+          highlights which weights selection + mutation just moved. Same
+          palette: <b style="color:#ff9a8a">red</b> negative,
+          <b style="color:#7fb8ff">blue</b> positive, dim = near zero.
         </p>
-        <canvas id="xray" width="42" height="42"></canvas>
-        <p class="dim" id="xray-caption" style="margin: 6px 0 0; text-align: center;">
-          waiting for the AI's first move…
-        </p>
+        <div class="xray-row">
+          <div class="xray-cell">
+            <canvas id="xray" width="42" height="42"></canvas>
+            <p class="dim xray-caption" id="xray-caption">weights — awaiting first move…</p>
+          </div>
+          <div class="xray-cell">
+            <canvas id="xray-diff" width="42" height="42"></canvas>
+            <p class="dim xray-caption" id="xray-diff-caption">delta — awaiting second move…</p>
+          </div>
+        </div>
       </div>
     </section>
   </section>

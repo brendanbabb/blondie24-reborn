@@ -61,6 +61,7 @@
     miniPlayback: null,   // { frames, step, timer }
     historyGens: [],      // cumulative per-gen fitness stats across the whole game
     turnBoundaries: [],   // generation numbers at which each AI turn started
+    prevXrayWeights: null, // last-turn snapshot, used for the diff panel
   };
 
   // ---- Worker setup ---------------------------------------------------------
@@ -241,31 +242,31 @@
     capEl.textContent = `gen 1 — ${maxGen} · best ${hi >= 0 ? "+" : ""}${hi.toFixed(1)} · ${state.turnBoundaries.length} AI turn${state.turnBoundaries.length === 1 ? "" : "s"}`;
   }
 
-  function renderNetworkXray(gen, weights) {
-    const canvas = document.getElementById("xray");
+  function paintWeightGrid(canvasId, vector, captionId, captionText) {
+    const canvas = document.getElementById(canvasId);
     const g = canvas.getContext("2d");
     const W = canvas.width;   // 42
     const H = canvas.height;  // 42
-    // Use the 95th-percentile absolute weight to pick a normalization scale so
-    // one very large outlier doesn't wash the whole image out.
-    const n = weights.length;
+    const n = vector.length;
+    // Normalize by 95th-percentile absolute value so outliers don't wash the
+    // image out. Each call picks its own scale — diff and weights have very
+    // different magnitude ranges, so sharing one scale would make diff blank.
     const absSorted = new Float32Array(n);
-    for (let i = 0; i < n; i++) absSorted[i] = Math.abs(weights[i]);
+    for (let i = 0; i < n; i++) absSorted[i] = Math.abs(vector[i]);
     absSorted.sort();
-    const norm = Math.max(1e-6, absSorted[Math.floor(n * 0.95)]);
+    const norm = Math.max(1e-9, absSorted[Math.floor(n * 0.95)]);
 
     const img = g.createImageData(W, H);
     for (let i = 0; i < W * H; i++) {
       const px = i * 4;
       if (i < n) {
-        const t = Math.max(-1, Math.min(1, weights[i] / norm));
+        const t = Math.max(-1, Math.min(1, vector[i] / norm));
         const c = divergingRGB(t);
         img.data[px] = c[0];
         img.data[px + 1] = c[1];
         img.data[px + 2] = c[2];
         img.data[px + 3] = 255;
       } else {
-        // Padding cells (1764 - 1743 = 21 extra) — dim gray.
         img.data[px] = 50;
         img.data[px + 1] = 55;
         img.data[px + 2] = 65;
@@ -273,9 +274,31 @@
       }
     }
     g.putImageData(img, 0, 0);
+    document.getElementById(captionId).textContent =
+      captionText.replace("{norm}", norm.toPrecision(2));
+  }
 
-    document.getElementById("xray-caption").textContent =
-      `gen ${gen} · 1,743 weights · 95% abs=${norm.toFixed(3)}`;
+  function renderNetworkXray(gen, weights) {
+    paintWeightGrid(
+      "xray", weights,
+      "xray-caption",
+      `weights · gen ${gen} · 95% abs={norm}`,
+    );
+
+    // Diff: current minus previous AI-turn snapshot. Skip on the first turn.
+    const prev = state.prevXrayWeights;
+    if (prev && prev.length === weights.length) {
+      const delta = new Float32Array(weights.length);
+      for (let i = 0; i < weights.length; i++) delta[i] = weights[i] - prev[i];
+      paintWeightGrid(
+        "xray-diff", delta,
+        "xray-diff-caption",
+        `delta · gen ${gen} · 95% abs={norm}`,
+      );
+    }
+    // Stash a copy — the worker's snapshot buffers get reused across turns
+    // if we kept a reference.
+    state.prevXrayWeights = new Float32Array(weights);
   }
 
   // Diverging red-to-blue, returns [r, g, b] in 0..255. Mirrors the `diverging`
@@ -344,14 +367,18 @@
     Render.drawMini(miniCtx, C.makeBoard().squares, { size: miniSize });
     setMiniCaption("waiting for first self-play game…");
     moveHistoryEl.innerHTML = "";
-    // Clear the x-ray (no snapshot yet this game).
-    const xrayCanvas = document.getElementById("xray");
-    if (xrayCanvas) {
-      const xg = xrayCanvas.getContext("2d");
-      xg.fillStyle = "#1f242f";
-      xg.fillRect(0, 0, xrayCanvas.width, xrayCanvas.height);
-      document.getElementById("xray-caption").textContent = "waiting for the AI's first move…";
+    // Clear the x-ray canvases (no snapshot yet this game) and the stashed
+    // previous-weights used for the diff panel.
+    state.prevXrayWeights = null;
+    for (const id of ["xray", "xray-diff"]) {
+      const c = document.getElementById(id);
+      if (!c) continue;
+      const g = c.getContext("2d");
+      g.fillStyle = "#1f242f";
+      g.fillRect(0, 0, c.width, c.height);
     }
+    document.getElementById("xray-caption").textContent = "weights — awaiting first move…";
+    document.getElementById("xray-diff-caption").textContent = "delta — awaiting second move…";
     renderHistoryChart();
 
     // Send the worker back to gen 0 for a fresh run.
