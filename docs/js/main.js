@@ -63,8 +63,6 @@
     miniPlayback: null,    // { game, step, finished, timer }
     historyGens: [],      // cumulative per-gen fitness stats across the whole game
     turnBoundaries: [],   // generation numbers at which each AI turn started
-    baselineXrayWeights: null, // first AI-turn snapshot, used as the "drift from" origin
-    baselineXrayGen: 0,
   };
 
   // ---- Worker setup ---------------------------------------------------------
@@ -241,47 +239,6 @@
     capEl.textContent = `gen 1 — ${maxGen} · best ${hi >= 0 ? "+" : ""}${hi.toFixed(1)} · ${state.turnBoundaries.length} AI turn${state.turnBoundaries.length === 1 ? "" : "s"}`;
   }
 
-  function paintWeightGrid(canvasId, vector, captionId, captionText, opts) {
-    opts = opts || {};
-    // gamma < 1 brightens mid-magnitude values without changing sign; used on
-    // the diff panel where most cells are small but some are interesting.
-    const gamma = opts.gamma != null ? opts.gamma : 1.0;
-    const canvas = document.getElementById(canvasId);
-    const g = canvas.getContext("2d");
-    const W = canvas.width;   // 42
-    const H = canvas.height;  // 42
-    const n = vector.length;
-    // Normalize by 95th-percentile absolute value so outliers don't wash the
-    // image out. Each call picks its own scale — diff and weights have very
-    // different magnitude ranges, so sharing one scale would make diff blank.
-    const absSorted = new Float32Array(n);
-    for (let i = 0; i < n; i++) absSorted[i] = Math.abs(vector[i]);
-    absSorted.sort();
-    const norm = Math.max(1e-9, absSorted[Math.floor(n * 0.95)]);
-
-    const img = g.createImageData(W, H);
-    for (let i = 0; i < W * H; i++) {
-      const px = i * 4;
-      if (i < n) {
-        const raw = Math.max(-1, Math.min(1, vector[i] / norm));
-        const boosted = Math.sign(raw) * Math.pow(Math.abs(raw), gamma);
-        const c = divergingRGB(boosted);
-        img.data[px] = c[0];
-        img.data[px + 1] = c[1];
-        img.data[px + 2] = c[2];
-        img.data[px + 3] = 255;
-      } else {
-        img.data[px] = 50;
-        img.data[px + 1] = 55;
-        img.data[px + 2] = 65;
-        img.data[px + 3] = 255;
-      }
-    }
-    g.putImageData(img, 0, 0);
-    document.getElementById(captionId).textContent =
-      captionText.replace("{norm}", norm.toPrecision(2));
-  }
-
   // Layered architecture view. Draws the network as 4 columns of nodes
   // (32 → 40 → 10 → 1) with the top-K strongest connections per layer drawn
   // as lines. Same diverging palette: red negative, blue positive.
@@ -396,57 +353,6 @@
       `gen ${gen} · 3 dense layers + piece-diff bypass · top-40 edges drawn per slab`;
   }
 
-  function renderNetworkXray(gen, weights) {
-    paintWeightGrid(
-      "xray", weights,
-      "xray-caption",
-      `weights · gen ${gen} · 95% abs={norm}`,
-    );
-
-    // Drift: current minus the first AI-turn snapshot. On turn 1 we only
-    // stash the baseline; from turn 2 onward we render cumulative drift,
-    // which grows monotonically as evolution accumulates.
-    if (state.baselineXrayWeights === null) {
-      state.baselineXrayWeights = new Float32Array(weights);
-      state.baselineXrayGen = gen;
-    } else {
-      const drift = new Float32Array(weights.length);
-      for (let i = 0; i < weights.length; i++) {
-        drift[i] = weights[i] - state.baselineXrayWeights[i];
-      }
-      paintWeightGrid(
-        "xray-diff", drift,
-        "xray-diff-caption",
-        `drift since gen ${state.baselineXrayGen} · 95% abs={norm}`,
-        { gamma: 0.55 },
-      );
-    }
-  }
-
-  // Diverging red-to-blue, returns [r, g, b] in 0..255. Bright endpoints,
-  // dim-but-still-readable center. Colorblind-safe (red / blue, no green).
-  function divergingRGB(t) {
-    const a = Math.min(1, Math.abs(t));
-    // Dead zone — render as a touch above the panel background so "no change"
-    // still reads as "I'm looking at a cell," just not a bright one.
-    if (a < 0.02) return [95, 105, 125];
-    if (t < 0) {
-      // red ramp: (95, 105, 125) → (255, 50, 50)
-      return [
-        Math.round(95 + 160 * a),
-        Math.round(105 - 55 * a),
-        Math.round(125 - 75 * a),
-      ];
-    } else {
-      // blue ramp: (95, 105, 125) → (60, 160, 255)
-      return [
-        Math.round(95 - 35 * a),
-        Math.round(105 + 55 * a),
-        Math.round(125 + 130 * a),
-      ];
-    }
-  }
-
   function appendMoveHistory(actor, move, captured, extra) {
     const path = describeMove(move);
     const capMsg = captured && captured.length ? ` × ${captured.join(",")}` : "";
@@ -495,18 +401,6 @@
     document.getElementById("mini-label").textContent = "—";
     document.getElementById("mini-caption").textContent = "waiting for first self-play game…";
     moveHistoryEl.innerHTML = "";
-    // Clear the x-ray canvases and the stashed baseline used for the drift panel.
-    state.baselineXrayWeights = null;
-    state.baselineXrayGen = 0;
-    for (const id of ["xray", "xray-diff"]) {
-      const c = document.getElementById(id);
-      if (!c) continue;
-      const g = c.getContext("2d");
-      g.fillStyle = "#1f242f";
-      g.fillRect(0, 0, c.width, c.height);
-    }
-    document.getElementById("xray-caption").textContent = "weights — awaiting first move…";
-    document.getElementById("xray-diff-caption").textContent = "drift — awaiting second move…";
     // Clear the layered-architecture view.
     const layersCanvas = document.getElementById("layers");
     if (layersCanvas) {
@@ -806,7 +700,6 @@
     try {
       state.aiNet = N.makeNetwork(snap.weights);
       log(`AI is moving (gen ${snap.gen})…`);
-      renderNetworkXray(snap.gen, snap.weights);
       renderLayeredNetwork(snap.gen, snap.weights);
       updatePosEval();
       const searchStart = performance.now();

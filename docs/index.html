@@ -173,25 +173,6 @@
         </p>
       </div>
 
-      <div class="panel" id="xray-panel">
-        <h2>Network x-ray &amp; evolution drift</h2>
-        <p class="legend">
-          <b>Left:</b> the champion network's 1,743 weights right now.
-          <b>Right:</b> how far every weight has drifted from the AI's
-          <em>first-move</em> snapshot — grows across the game as evolution
-          accumulates. Red negative, blue positive, dim = unchanged.
-        </p>
-        <div class="xray-row">
-          <div class="xray-cell">
-            <canvas id="xray" width="42" height="42"></canvas>
-            <p class="dim xray-caption" id="xray-caption">weights — awaiting first move…</p>
-          </div>
-          <div class="xray-cell">
-            <canvas id="xray-diff" width="42" height="42"></canvas>
-            <p class="dim xray-caption" id="xray-diff-caption">drift — awaiting second move…</p>
-          </div>
-        </div>
-      </div>
     </section>
   </section>
 
