@@ -241,6 +241,63 @@
     capEl.textContent = `gen 1 — ${maxGen} · best ${hi >= 0 ? "+" : ""}${hi.toFixed(1)} · ${state.turnBoundaries.length} AI turn${state.turnBoundaries.length === 1 ? "" : "s"}`;
   }
 
+  function renderNetworkXray(gen, weights) {
+    const canvas = document.getElementById("xray");
+    const g = canvas.getContext("2d");
+    const W = canvas.width;   // 42
+    const H = canvas.height;  // 42
+    // Use the 95th-percentile absolute weight to pick a normalization scale so
+    // one very large outlier doesn't wash the whole image out.
+    const n = weights.length;
+    const absSorted = new Float32Array(n);
+    for (let i = 0; i < n; i++) absSorted[i] = Math.abs(weights[i]);
+    absSorted.sort();
+    const norm = Math.max(1e-6, absSorted[Math.floor(n * 0.95)]);
+
+    const img = g.createImageData(W, H);
+    for (let i = 0; i < W * H; i++) {
+      const px = i * 4;
+      if (i < n) {
+        const t = Math.max(-1, Math.min(1, weights[i] / norm));
+        const c = divergingRGB(t);
+        img.data[px] = c[0];
+        img.data[px + 1] = c[1];
+        img.data[px + 2] = c[2];
+        img.data[px + 3] = 255;
+      } else {
+        // Padding cells (1764 - 1743 = 21 extra) — dim gray.
+        img.data[px] = 50;
+        img.data[px + 1] = 55;
+        img.data[px + 2] = 65;
+        img.data[px + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+
+    document.getElementById("xray-caption").textContent =
+      `gen ${gen} · 1,743 weights · 95% abs=${norm.toFixed(3)}`;
+  }
+
+  // Diverging red-to-blue, returns [r, g, b] in 0..255. Mirrors the `diverging`
+  // CSS helper but outputs raw RGB for ImageData pixels (no alpha blending).
+  function divergingRGB(t) {
+    const a = Math.min(1, Math.abs(t));
+    if (a < 0.03) return [90, 100, 120];
+    if (t < 0) {
+      return [
+        Math.round(80 + 150 * a),
+        Math.round(80 - 30 * a),
+        Math.round(80 - 30 * a),
+      ];
+    } else {
+      return [
+        Math.round(95 - 20 * a),
+        Math.round(110 + 40 * a),
+        Math.round(120 + 120 * a),
+      ];
+    }
+  }
+
   function appendFingerprint(gen, weights) {
     // 32 values: input-to-first-hidden-unit weights. In the flat layout, W1
     // is [40 × 32] row-major starting at offset 0, so h[0]'s inputs are the
@@ -341,6 +398,14 @@
     setMiniCaption("waiting for first self-play game…");
     moveHistoryEl.innerHTML = "";
     document.getElementById("fingerprints-strip").innerHTML = "";
+    // Clear the x-ray (no snapshot yet this game).
+    const xrayCanvas = document.getElementById("xray");
+    if (xrayCanvas) {
+      const xg = xrayCanvas.getContext("2d");
+      xg.fillStyle = "#1f242f";
+      xg.fillRect(0, 0, xrayCanvas.width, xrayCanvas.height);
+      document.getElementById("xray-caption").textContent = "waiting for the AI's first move…";
+    }
     renderHistoryChart();
 
     // Send the worker back to gen 0 for a fresh run.
@@ -632,6 +697,7 @@
       state.aiNet = N.makeNetwork(snap.weights);
       log(`AI is moving (gen ${snap.gen})…`);
       appendFingerprint(snap.gen, snap.weights);
+      renderNetworkXray(snap.gen, snap.weights);
       updatePosEval();
       const searchStart = performance.now();
       const result = M.pickMove(state.board, AI_DEPTH, state.aiNet);

@@ -280,9 +280,9 @@ canvas#board {
 
 #controls {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  margin-top: 20px;
+  margin: 0 0 4px;
   flex-wrap: wrap;
 }
 #controls button {
@@ -435,6 +435,19 @@ body.human-black #pieces-panel .pip-ai  { background: #e8e8e8; border-color: #88
   font-size: 12px;
   font-style: italic;
   padding: 4px;
+}
+
+/* Full-network x-ray */
+#xray-panel canvas {
+  display: block;
+  margin: 8px auto 0;
+  width: 210px;
+  height: 210px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: var(--panel-2);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--border);
 }
 
 /* Eval bar */

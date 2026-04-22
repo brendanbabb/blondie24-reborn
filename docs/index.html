@@ -34,6 +34,18 @@
 
   <section id="game">
     <div id="board-wrap">
+      <section id="controls">
+        <button id="new-game">New game</button>
+        <button id="offer-draw" type="button">Offer draw</button>
+        <button id="resign" type="button" class="danger">Resign</button>
+        <label>
+          You play
+          <select id="human-color">
+            <option value="white">White (AI moves first)</option>
+            <option value="black">Black (you move first)</option>
+          </select>
+        </label>
+      </section>
       <canvas id="board" width="480" height="480"></canvas>
       <div id="status-banner" hidden></div>
       <div id="move-log" aria-live="polite"></div>
@@ -105,7 +117,7 @@
 
       <!-- Leaderboard + mini-play moved to #extras below. -->
 
-      <div class="panel" id="history-panel">
+      <div class="panel" id="history-panel" hidden>
         <h2>Training arc this game</h2>
         <p class="legend">
           Best (yellow) and mean (gray) fitness per generation. Ticks mark
@@ -115,16 +127,6 @@
         <p class="dim" id="history-caption" style="margin: 4px 0 0; text-align: center;">—</p>
       </div>
 
-      <div class="panel" id="fingerprints-panel">
-        <h2>Network fingerprints</h2>
-        <p class="legend">
-          One badge per AI turn. Each 4×8 grid maps to the 32 dark squares
-          and shows how much the first hidden neuron weights each square —
-          <b style="color:#ff9a8a">red</b> negative, <b style="color:#7fb8ff">blue</b> positive,
-          dim = near zero. Watch it shift as the population evolves.
-        </p>
-        <div id="fingerprints-strip"></div>
-      </div>
     </aside>
 
     <section id="extras">
@@ -145,21 +147,33 @@
           <li class="placeholder">Waiting for first generation…</li>
         </ol>
       </div>
+
+      <div class="panel" id="fingerprints-panel">
+        <h2>Network fingerprints</h2>
+        <p class="legend">
+          One badge per AI turn. Each 4×8 grid maps to the 32 dark squares
+          and shows how much the first hidden neuron weights each square —
+          <b style="color:#ff9a8a">red</b> negative, <b style="color:#7fb8ff">blue</b> positive,
+          dim = near zero. Watch it shift as the population evolves.
+        </p>
+        <div id="fingerprints-strip"></div>
+      </div>
+
+      <div class="panel" id="xray-panel">
+        <h2>Current network x-ray</h2>
+        <p class="legend">
+          All <b>1,743</b> weights of the latest AI-moving network, rendered
+          one weight per pixel (42×42 grid). Same diverging palette —
+          <b style="color:#ff9a8a">red</b> negative, <b style="color:#7fb8ff">blue</b> positive.
+        </p>
+        <canvas id="xray" width="42" height="42"></canvas>
+        <p class="dim" id="xray-caption" style="margin: 6px 0 0; text-align: center;">
+          waiting for the AI's first move…
+        </p>
+      </div>
     </section>
   </section>
 
-  <section id="controls">
-    <button id="new-game">New game</button>
-    <button id="offer-draw" type="button">Offer draw</button>
-    <button id="resign" type="button" class="danger">Resign</button>
-    <label>
-      You play
-      <select id="human-color">
-        <option value="white">White (AI moves first)</option>
-        <option value="black">Black (you move first)</option>
-      </select>
-    </label>
-  </section>
 
 </main>
 
