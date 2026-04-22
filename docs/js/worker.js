@@ -31,7 +31,13 @@ const M = self.Minimax;
 // Demo-tuned EP hyperparameters — smaller than paper for browser responsiveness.
 const POP_SIZE = 6;
 const GAMES_PER_INDIVIDUAL = 3;   // paper uses 5; 3 gives acceptable ranking at pop=6 while keeping gens/sec up
-const TRAIN_SEARCH_DEPTH = 3;     // self-play search depth during evolution (game-play against the human still uses 4)
+// Adaptive training depth. Openings have wide branching and shallow search is
+// enough to rank networks; endgames have narrow branching but require more
+// plies to actually convert material into wins — at a flat depth 3 most
+// winning endgames degenerate into shuffle draws via threefold repetition.
+const TRAIN_DEPTH_OPENING  = 3;
+const TRAIN_DEPTH_ENDGAME  = 5;
+const ENDGAME_PIECE_THRESHOLD = 6;   // <= this many total pieces → use endgame depth
 const MAX_GAME_MOVES = 100;       // move cap for self-play games
 
 const WIN_SCORE = 1.0;
@@ -98,7 +104,11 @@ function playGame(black, white, record) {
     if (stateCounts[key] >= 3) return { winner: 0, frames };
 
     const net = board.currentPlayer === C.BLACK ? blackNet : whiteNet;
-    const { move } = M.pickMove(board, TRAIN_SEARCH_DEPTH, net);
+    const [bc, wc] = C.pieceCount(board);
+    const depth = (bc + wc) <= ENDGAME_PIECE_THRESHOLD
+      ? TRAIN_DEPTH_ENDGAME
+      : TRAIN_DEPTH_OPENING;
+    const { move } = M.pickMove(board, depth, net);
     if (!move) return { winner: -board.currentPlayer, frames };
     board = C.applyMove(board, move);
     if (frames) frames.push(new Int8Array(board.squares));
