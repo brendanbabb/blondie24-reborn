@@ -22,9 +22,9 @@
       </p>
       <p><b>Every AI turn, here's what happens in roughly two seconds:</b></p>
       <ol>
-        <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>4 self-play games</b> against random opponents from the group, with each search going <b>4 plies deep</b> — the same depth used against you.</li>
+        <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>3 self-play games</b> against random opponents from the group, with each search going <b>4 plies deep</b> — the same depth used against you.</li>
         <li>Games are scored <b>+1 win / 0 draw / −2 loss</b> (paper's asymmetric scoring). The top 3 networks survive; the bottom 3 are replaced by <b>Gaussian-mutated offspring</b> of the survivors.</li>
-        <li>That's <b>one generation</b>. The browser runs as many gens as fit into those two seconds — typically 3–10 at these settings.</li>
+        <li>That's <b>one generation</b>. The browser runs as many gens as fit into those two seconds — typically 4–12 at these settings.</li>
         <li>Time's up. The current <b>top-ranked network</b> runs depth-4 minimax from the board you see and plays a move. The snapshot is frozen — it doesn't change while you think.</li>
       </ol>
       <p>
@@ -136,18 +136,14 @@
     <section id="extras">
       <div class="panel" id="mini-panel">
         <h2>Self-play happening now</h2>
-        <p class="legend">Two training games from the most recent generation, replayed while you think.</p>
-        <div class="mini-pair">
-          <div class="mini-cell">
-            <span class="mini-label">Game A</span>
-            <canvas id="mini-board-a" width="160" height="160"></canvas>
-            <p class="mini-caption dim"><span id="mini-caption-a">—</span></p>
-          </div>
-          <div class="mini-cell">
-            <span class="mini-label">Game B</span>
-            <canvas id="mini-board-b" width="160" height="160"></canvas>
-            <p class="mini-caption dim"><span id="mini-caption-b">—</span></p>
-          </div>
+        <p class="legend">
+          Two training games from the most recent generation, replayed here
+          while you think. Alternates <b>Game A</b> ↔ <b>Game B</b>.
+        </p>
+        <div class="mini-cell">
+          <span class="mini-label" id="mini-label">—</span>
+          <canvas id="mini-board" width="200" height="200"></canvas>
+          <p class="mini-caption dim" id="mini-caption">—</p>
         </div>
       </div>
 

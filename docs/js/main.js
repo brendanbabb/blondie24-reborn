@@ -22,11 +22,9 @@
 
   const canvas = document.getElementById("board");
   const ctx = canvas.getContext("2d");
-  const miniCanvasA = document.getElementById("mini-board-a");
-  const miniCanvasB = document.getElementById("mini-board-b");
-  const miniCtxA = miniCanvasA.getContext("2d");
-  const miniCtxB = miniCanvasB.getContext("2d");
-  const miniSize = miniCanvasA.width;   // both panels share this size
+  const miniCanvas = document.getElementById("mini-board");
+  const miniCtx = miniCanvas.getContext("2d");
+  const miniSize = miniCanvas.width;
   const moveLog = document.getElementById("move-log");
   const moveHistoryEl = document.getElementById("move-history");
   const historyCanvas = document.getElementById("history-chart");
@@ -61,8 +59,8 @@
     aiMoveCount: 0,    // AI moves committed this game
     latestSampleGameA: null,
     latestSampleGameB: null,
-    miniPlaybackA: null,   // { game, step, finished, timer }
-    miniPlaybackB: null,
+    miniSlot: "A",         // which sample game is currently playing back: "A" or "B"
+    miniPlayback: null,    // { game, step, finished, timer }
     historyGens: [],      // cumulative per-gen fitness stats across the whole game
     turnBoundaries: [],   // generation numbers at which each AI turn started
     baselineXrayWeights: null, // first AI-turn snapshot, used as the "drift from" origin
@@ -379,11 +377,9 @@
     state.historyGens = [];
     state.turnBoundaries = [];
     stopAllMiniPlaybacks();
-    const startingSquares = C.makeBoard().squares;
-    Render.drawMini(miniCtxA, startingSquares, { size: miniSize });
-    Render.drawMini(miniCtxB, startingSquares, { size: miniSize });
-    document.getElementById("mini-caption-a").textContent = "waiting for first self-play game…";
-    document.getElementById("mini-caption-b").textContent = "waiting for first self-play game…";
+    Render.drawMini(miniCtx, C.makeBoard().squares, { size: miniSize });
+    document.getElementById("mini-label").textContent = "—";
+    document.getElementById("mini-caption").textContent = "waiting for first self-play game…";
     moveHistoryEl.innerHTML = "";
     // Clear the x-ray canvases and the stashed baseline used for the drift panel.
     state.baselineXrayWeights = null;
@@ -654,8 +650,8 @@
     // Pause the mini replay while the AI trains — we'll start a fresh one
     // (from this turn's games) as soon as the AI has finished moving.
     stopAllMiniPlaybacks();
-    document.getElementById("mini-caption-a").textContent = "AI is training — new games in progress…";
-    document.getElementById("mini-caption-b").textContent = "AI is training — new games in progress…";
+    document.getElementById("mini-label").textContent = "—";
+    document.getElementById("mini-caption").textContent = "AI is training — new games in progress…";
     log("AI is training…");
     updateButtons();
 
@@ -720,85 +716,86 @@
     }
   }
 
-  // ---- Mini self-play replays (Game A + Game B) ----------------------------
+  // ---- Mini self-play replay (alternates Game A and Game B) ----------------
 
-  const MINI_STEP_MS = 220;  // ms between frames in each mini replay
+  const MINI_STEP_MS = 220;   // ms between frames
+  const MINI_END_HOLD_MS = 1800;  // how long the winner banner stays up before swapping
 
-  const MINI_SLOTS = {
-    A: {
-      ctx: miniCtxA,
-      captionEl: () => document.getElementById("mini-caption-a"),
-      getLatest: () => state.latestSampleGameA,
-      getPlayback: () => state.miniPlaybackA,
-      setPlayback: (pb) => { state.miniPlaybackA = pb; },
-    },
-    B: {
-      ctx: miniCtxB,
-      captionEl: () => document.getElementById("mini-caption-b"),
-      getLatest: () => state.latestSampleGameB,
-      getPlayback: () => state.miniPlaybackB,
-      setPlayback: (pb) => { state.miniPlaybackB = pb; },
-    },
-  };
+  function latestSampleFor(slotId) {
+    return slotId === "A" ? state.latestSampleGameA : state.latestSampleGameB;
+  }
 
   function startAllMiniPlaybacks() {
-    startMiniPlayback("A");
-    startMiniPlayback("B");
+    // Picks the currently-selected slot. Falls back to the other if empty.
+    startMiniPlayback(state.miniSlot || "A");
   }
 
   function stopAllMiniPlaybacks() {
-    stopMiniPlayback("A");
-    stopMiniPlayback("B");
+    stopMiniPlayback();
+  }
+
+  function setMiniLabel(slotId, caption) {
+    document.getElementById("mini-label").textContent = "Game " + slotId;
+    document.getElementById("mini-caption").textContent = caption;
   }
 
   function startMiniPlayback(slotId) {
-    const slot = MINI_SLOTS[slotId];
-    stopMiniPlayback(slotId);
-    const game = slot.getLatest();
+    stopMiniPlayback();
+    let game = latestSampleFor(slotId);
+    let usedSlot = slotId;
     if (!game || !game.frames || game.frames.length === 0) {
-      slot.captionEl().textContent = "waiting for self-play game…";
-      return;
+      // No game in the requested slot; try the other before giving up.
+      const other = slotId === "A" ? "B" : "A";
+      const otherGame = latestSampleFor(other);
+      if (otherGame && otherGame.frames && otherGame.frames.length > 0) {
+        game = otherGame;
+        usedSlot = other;
+      } else {
+        setMiniLabel(slotId, "waiting for self-play game…");
+        return;
+      }
     }
-    const pb = { game, step: 0, finished: false, timer: null };
-    slot.setPlayback(pb);
-    tickMiniPlayback(slotId);
+    state.miniSlot = usedSlot;
+    state.miniPlayback = { game, slotId: usedSlot, step: 0, finished: false, timer: null };
+    tickMiniPlayback();
   }
 
-  function stopMiniPlayback(slotId) {
-    const slot = MINI_SLOTS[slotId];
-    const pb = slot.getPlayback();
-    if (pb && pb.timer != null) clearTimeout(pb.timer);
-    slot.setPlayback(null);
+  function stopMiniPlayback() {
+    if (state.miniPlayback && state.miniPlayback.timer != null) {
+      clearTimeout(state.miniPlayback.timer);
+    }
+    state.miniPlayback = null;
   }
 
-  function tickMiniPlayback(slotId) {
-    const slot = MINI_SLOTS[slotId];
-    const pb = slot.getPlayback();
+  function tickMiniPlayback() {
+    const pb = state.miniPlayback;
     if (!pb) return;
     const frames = pb.game.frames;
     const squares = frames[pb.step];
-    Render.drawMini(slot.ctx, squares, { size: miniSize });
+    Render.drawMini(miniCtx, squares, { size: miniSize });
     if (pb.step >= frames.length - 1) {
-      drawWinnerOverlay(slot.ctx, miniSize, pb.game.winner);
+      drawWinnerOverlay(miniCtx, miniSize, pb.game.winner);
     }
-    slot.captionEl().textContent = miniCaptionFor(pb.game, pb.step);
+    setMiniLabel(pb.slotId, miniCaptionFor(pb.game, pb.step));
 
     pb.step += 1;
     if (pb.step >= frames.length) {
       pb.finished = true;
       pb.timer = setTimeout(() => {
-        const latest = slot.getLatest();
-        if (latest && latest !== pb.game) {
-          startMiniPlayback(slotId);
+        // Alternate: swap to the other slot if it has a game, else replay this one.
+        const otherSlot = pb.slotId === "A" ? "B" : "A";
+        const otherGame = latestSampleFor(otherSlot);
+        if (otherGame && otherGame.frames && otherGame.frames.length > 0) {
+          startMiniPlayback(otherSlot);
         } else {
-          pb.step = 0;
-          pb.finished = false;
-          tickMiniPlayback(slotId);
+          // No other-slot game; restart the current one (possibly with a
+          // refreshed frame set if a newer version arrived).
+          startMiniPlayback(pb.slotId);
         }
-      }, 1400);
+      }, MINI_END_HOLD_MS);
       return;
     }
-    pb.timer = setTimeout(() => tickMiniPlayback(slotId), MINI_STEP_MS);
+    pb.timer = setTimeout(tickMiniPlayback, MINI_STEP_MS);
   }
 
   function miniCaptionFor(game, step) {
@@ -961,13 +958,11 @@
   resignBtn.addEventListener("click", onResign);
   humanColorSel.addEventListener("change", resetGame);
 
-  // Draw the starting board on each mini canvas immediately so the panel is
+  // Draw the starting board on the mini canvas immediately so the panel is
   // populated before the first self-play game arrives.
-  const startingSquares = C.makeBoard().squares;
-  Render.drawMini(miniCtxA, startingSquares, { size: miniSize });
-  Render.drawMini(miniCtxB, startingSquares, { size: miniSize });
-  document.getElementById("mini-caption-a").textContent = "starting position — self-play replays here during your turn";
-  document.getElementById("mini-caption-b").textContent = "starting position — self-play replays here during your turn";
+  Render.drawMini(miniCtx, C.makeBoard().squares, { size: miniSize });
+  document.getElementById("mini-label").textContent = "—";
+  document.getElementById("mini-caption").textContent = "starting position — self-play replays here during your turn";
 
   resetGame();
 })();
