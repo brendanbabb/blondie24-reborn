@@ -54,7 +54,28 @@ def _mp_worker_init():
     game of either architecture isn't slow. Warming both is cheap and
     avoids branching on architecture at init time — the worker pool is
     shared across both paths within a run.
+
+    First we redirect NUMBA_CACHE_DIR to a per-PID temp dir so each worker
+    writes its own compiled artifacts. Two problems this avoids:
+      1. Loading a parent-written cache entry cross-process segfaults on
+         Py3.14 + Numba 0.65 (access violation in the first cached call).
+      2. Many workers writing to one shared fresh dir race and corrupt
+         each other's artifacts ("Symbol not found .numba.unresolved$..."
+         LLVM link errors at ~8+ workers).
+    Per-PID dirs sidestep both. Cost: each worker pays the full compile
+    on first use (~30-45s), paid once per pool lifetime and in parallel.
     """
+    import os, tempfile, atexit, shutil
+    pid_dir = os.path.join(tempfile.gettempdir(), f"numba_w_{os.getpid()}")
+    os.makedirs(pid_dir, exist_ok=True)
+    os.environ["NUMBA_CACHE_DIR"] = pid_dir
+    atexit.register(shutil.rmtree, pid_dir, True)
+    try:
+        import numba.core.config as nbc
+        nbc.reload_config()
+    except Exception:
+        pass
+
     from search.fast_minimax_jit import warmup
     warmup()
     try:

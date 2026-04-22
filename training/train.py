@@ -25,8 +25,6 @@ Usage:
 
 import argparse
 import os
-import shutil
-import tempfile
 import time
 import json
 import multiprocessing as mp
@@ -136,7 +134,6 @@ def train(config: Config):
     use_round_robin = config.training.tournament == "round-robin"
     pool = None
     n_workers = 0
-    worker_cache_dir = None
 
     if device.type == "cpu":
         requested = config.training.num_workers
@@ -148,13 +145,10 @@ def train(config: Config):
             _mp_worker_init()
         else:
             n_workers = requested or max(1, (os.cpu_count() or 2) - 1)
-            # Numba disk cache written by one process segfaults on load in
-            # another (Py3.14 + Numba 0.65). Point workers at a fresh empty
-            # cache dir via env — they inherit it on spawn, find no cache,
-            # compile in-process, and never touch the parent's cache.
-            worker_cache_dir = tempfile.mkdtemp(prefix="numba_worker_cache_")
-            os.environ["NUMBA_CACHE_DIR"] = worker_cache_dir
-            print(f"  Spawning {n_workers} workers (cache: {worker_cache_dir})...")
+            # Workers pick their own per-PID NUMBA_CACHE_DIR inside
+            # _mp_worker_init — needed to dodge both the cross-process
+            # cache-reload segfault and the shared-dir concurrent-write race.
+            print(f"  Spawning {n_workers} workers...")
             pool = mp.Pool(processes=n_workers, initializer=_mp_worker_init)
 
     if use_round_robin and device.type == "cuda":
@@ -259,8 +253,6 @@ def train(config: Config):
     if pool is not None:
         pool.close()
         pool.join()
-    if worker_cache_dir is not None:
-        shutil.rmtree(worker_cache_dir, ignore_errors=True)
 
     print("\n" + "=" * 64)
     print("  Training complete!")

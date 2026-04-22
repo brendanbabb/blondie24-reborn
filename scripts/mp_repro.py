@@ -10,6 +10,8 @@ Test matrix (run each separately):
   python -u -m scripts.mp_repro parent-warm-worker-play  # parent warms, worker has no init, plays game (tests cache-reload via game call)
   python -u -m scripts.mp_repro fresh-cache-dir          # parent warms in dir A, workers spawn with NUMBA_CACHE_DIR=<fresh dir B>
   python -u -m scripts.mp_repro fresh-cache-dir-4w       # same as above but 4 workers + 32 games (tests shared-dir write race)
+  python -u -m scripts.mp_repro fresh-cache-dir-12w      # 12 workers + 75 games in shared fresh dir (reproduces concurrent-write race)
+  python -u -m scripts.mp_repro per-worker-dir-12w       # 12 workers, each with own per-PID cache dir set in initializer
 """
 import faulthandler
 faulthandler.enable()
@@ -29,6 +31,28 @@ def _one_game(task):
     """Run one real game in the worker — same shape as _mp_play_one."""
     from evolution.tournament import _mp_play_one
     return _mp_play_one(task)
+
+
+def _per_worker_init():
+    """Worker initializer that installs a per-PID NUMBA_CACHE_DIR before
+    any JIT compile, so workers never share a cache dir with each other
+    (the concurrent-write race kills 8+ workers on the shared-dir path).
+
+    Numba resolves CACHE_DIR at first compile, not at import, so setting
+    env + reload_config() here is enough — the @njit-decorated modules
+    were imported on spawn but haven't been called yet.
+    """
+    import os, tempfile
+    pid_dir = os.path.join(tempfile.gettempdir(), f"numba_w_{os.getpid()}")
+    os.makedirs(pid_dir, exist_ok=True)
+    os.environ["NUMBA_CACHE_DIR"] = pid_dir
+    try:
+        import numba.core.config as nbc
+        nbc.reload_config()
+    except Exception as e:
+        print(f"[worker {os.getpid()}] reload_config failed: {e}", flush=True)
+    from evolution.tournament import _mp_worker_init
+    _mp_worker_init()
 
 
 def _build_one_game_task(depth=4):
@@ -153,6 +177,38 @@ def run(mode):
         r = pool.apply_async(_one_game, (task,))
         result = r.get(timeout=300)
         print(f"[repro] game result: {result} in {time.time()-t2:.2f}s")
+        pool.close()
+        pool.join()
+        print(f"[repro] done total={time.time()-t0:.2f}s")
+
+    elif mode == "fresh-cache-dir-12w":
+        import tempfile
+        from evolution.tournament import _mp_worker_init
+        # NO parent warmup — workers will compile fresh in their own cache dir.
+        fresh = tempfile.mkdtemp(prefix="numba_worker_cache_")
+        os.environ["NUMBA_CACHE_DIR"] = fresh
+        print(f"[repro] set NUMBA_CACHE_DIR={fresh}")
+        t1 = time.time()
+        pool = mp.Pool(processes=12, initializer=_mp_worker_init)
+        print(f"[repro] pool created {time.time()-t1:.2f}s")
+        tasks = [_build_one_game_task(depth=4) for _ in range(75)]
+        t2 = time.time()
+        results = pool.map(_one_game, tasks)
+        print(f"[repro] {len(results)} games done in {time.time()-t2:.2f}s")
+        pool.close()
+        pool.join()
+        print(f"[repro] done total={time.time()-t0:.2f}s")
+
+    elif mode == "per-worker-dir-12w":
+        # 12 workers with per-PID cache dirs via _per_worker_init.
+        # No shared-dir writes → no race.
+        t1 = time.time()
+        pool = mp.Pool(processes=12, initializer=_per_worker_init)
+        print(f"[repro] pool created {time.time()-t1:.2f}s")
+        tasks = [_build_one_game_task(depth=4) for _ in range(75)]
+        t2 = time.time()
+        results = pool.map(_one_game, tasks)
+        print(f"[repro] {len(results)} games done in {time.time()-t2:.2f}s")
         pool.close()
         pool.join()
         print(f"[repro] done total={time.time()-t0:.2f}s")
