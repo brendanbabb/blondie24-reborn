@@ -31,7 +31,7 @@ const M = self.Minimax;
 // Demo-tuned EP hyperparameters — smaller than paper for browser responsiveness.
 const POP_SIZE = 6;
 const GAMES_PER_INDIVIDUAL = 3;   // paper uses 5; 3 gives acceptable ranking at pop=6 while keeping gens/sec up
-const TRAIN_SEARCH_DEPTH = 4;     // self-play search depth during evolution (matches paper + game-play)
+const TRAIN_SEARCH_DEPTH = 3;     // self-play search depth during evolution (game-play against the human still uses 4)
 const MAX_GAME_MOVES = 100;       // move cap for self-play games
 
 const WIN_SCORE = 1.0;
