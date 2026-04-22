@@ -22,7 +22,7 @@
       </p>
       <p><b>Every AI turn, here's what happens in roughly two seconds:</b></p>
       <ol>
-        <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>3 self-play games</b> against random opponents from the group. Training search goes <b>3 plies deep</b> (shallower than the 4-ply search the AI uses against you — keeps training fast).</li>
+        <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>2 self-play games</b> against random opponents from the group. Training search goes <b>3 plies deep</b> (shallower than the 4-ply search the AI uses against you — keeps training fast).</li>
         <li>Games are scored <b>+1 win / 0 draw / −2 loss</b> (paper's asymmetric scoring). The top 3 networks survive; the bottom 3 are replaced by <b>Gaussian-mutated offspring</b> of the survivors.</li>
         <li>That's <b>one generation</b>. The browser runs as many gens as fit into those two seconds — typically 4–12 at these settings.</li>
         <li>Time's up. The current <b>top-ranked network</b> runs depth-4 minimax from the board you see and plays a move. The snapshot is frozen — it doesn't change while you think.</li>
@@ -151,7 +151,7 @@
         <h2>Self-play leaderboard</h2>
         <p class="legend">
           6 networks · 2 games each per generation ·
-          <b>+1</b> win / <b>0</b> draw / <b>−2</b> loss.
+          <b>+1</b> win / <b>0</b> draw / <b>−2</b> loss (paper scoring).
         </p>
         <ol id="leaderboard">
           <li class="placeholder">Waiting for first generation…</li>
