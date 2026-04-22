@@ -36,7 +36,7 @@ const GAMES_PER_INDIVIDUAL = 3;   // paper uses 5; 3 gives reasonable ranking at
 // plies to actually convert material into wins — at a flat depth 3 most
 // winning endgames degenerate into shuffle draws via threefold repetition.
 const TRAIN_DEPTH_OPENING  = 3;
-const TRAIN_DEPTH_ENDGAME  = 5;
+const TRAIN_DEPTH_ENDGAME  = 7;
 const ENDGAME_PIECE_THRESHOLD = 6;   // <= this many total pieces → use endgame depth
 const MAX_GAME_MOVES = 100;       // move cap for self-play games
 
