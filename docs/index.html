@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Blondie24 Reborn — Evolving Opponent Demo</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<main>
+  <header>
+    <h1>Blondie24 Reborn</h1>
+    <p class="subtitle">A checkers opponent that evolves while it plays you.</p>
+    <details id="about">
+      <summary>What am I looking at?</summary>
+      <p>
+        A live re-implementation of Chellapilla &amp; Fogel's 1999 evolutionary
+        checkers experiment: a 1,743-weight feedforward network that learns to
+        play checkers with no hand-crafted evaluation, no opening book, no
+        endgame database, and no backpropagation — only self-play under an
+        evolutionary strategy.
+      </p>
+      <p>
+        Every time the AI moves, it evolves for <strong>one second</strong>
+        first: its population of 6 networks plays a self-play tournament, the
+        best survives, and that snapshot plays the move against you. Across
+        ~30 AI turns in a single game, the population runs through
+        hundreds of generations — more than the paper's reported 250 for
+        Class-A play — all in the time it takes to play one game.
+        <a href="https://github.com/brendanbabb/blondie24-reborn" target="_blank" rel="noreferrer">Source on GitHub</a>.
+      </p>
+    </details>
+  </header>
+
+  <section id="game">
+    <div id="board-wrap">
+      <canvas id="board" width="480" height="480"></canvas>
+      <div id="status-banner" hidden></div>
+      <div id="move-log" aria-live="polite"></div>
+      <ol id="move-history" aria-label="Move history"></ol>
+    </div>
+
+    <aside id="side-panel">
+      <div class="panel" id="pieces-panel">
+        <h2>Pieces</h2>
+        <div class="piece-row" id="piece-row-you">
+          <span class="pip pip-you"></span>
+          <span class="who">You</span>
+          <span class="count"><span id="count-you">12</span><span class="unit">pcs</span></span>
+          <span class="kings"><span id="kings-you">0</span><span class="unit">kings</span></span>
+        </div>
+        <div class="piece-row" id="piece-row-ai">
+          <span class="pip pip-ai"></span>
+          <span class="who">AI</span>
+          <span class="count"><span id="count-ai">12</span><span class="unit">pcs</span></span>
+          <span class="kings"><span id="kings-ai">0</span><span class="unit">kings</span></span>
+        </div>
+      </div>
+
+      <div class="panel" id="training-panel">
+        <h2>Training</h2>
+        <div class="stat"><span class="label">Generation</span><span id="gen-counter">—</span></div>
+        <div class="stat"><span class="label">Gens this turn</span><span id="gen-delta">—</span></div>
+        <div class="stat"><span class="label">Gens/sec</span><span id="gens-per-sec">—</span></div>
+        <div class="stat" title="Total wall time the AI has spent this game, across all its turns.">
+          <span class="label">AI total time</span>
+          <span id="ai-total-time">0.0 s</span>
+        </div>
+        <div class="stat substat" title="Time spent running self-play evolution during AI turns.">
+          <span class="label">— evolving</span>
+          <span id="ai-evolve-time">0.0 s</span>
+        </div>
+        <div class="stat substat" title="Time spent running depth-4 minimax to choose the AI's move.">
+          <span class="label">— searching</span>
+          <span id="ai-search-time">0.0 s</span>
+        </div>
+        <div class="stat" title="Number of AI moves made this game.">
+          <span class="label">AI moves made</span>
+          <span id="ai-move-count">0</span>
+        </div>
+      </div>
+
+      <div class="panel" id="eval-panel">
+        <h2>How the AI sees the board</h2>
+        <p class="legend">
+          The AI's network outputs a score from its own side's viewpoint,
+          flipped here to show it from <b>your</b> viewpoint. Range [−1, +1].
+        </p>
+        <div id="eval-bar-wrap">
+          <div id="eval-bar">
+            <div id="eval-bar-fill"></div>
+            <div id="eval-bar-center"></div>
+          </div>
+          <div class="eval-labels">
+            <span>AI ahead</span>
+            <span>even</span>
+            <span>You ahead</span>
+          </div>
+        </div>
+        <div class="eval-summary">
+          <span id="eval-number">—</span>
+          <span id="eval-verdict" class="dim">waiting for AI to move…</span>
+        </div>
+      </div>
+
+      <!-- Leaderboard + mini-play moved to #extras below. -->
+
+      <div class="panel" id="history-panel">
+        <h2>Training arc this game</h2>
+        <p class="legend">
+          Best (yellow) and mean (gray) fitness per generation across every
+          AI turn so far. Vertical ticks mark the start of each AI turn.
+        </p>
+        <canvas id="history-chart" width="280" height="140"></canvas>
+        <p class="dim" id="history-caption" style="margin: 4px 0 0; text-align: center;">—</p>
+      </div>
+    </aside>
+
+    <section id="extras">
+      <div class="panel" id="mini-panel">
+        <h2>Self-play happening now</h2>
+        <p class="legend">A training game from the most recent generation, replayed while you think.</p>
+        <canvas id="mini-board" width="200" height="200"></canvas>
+        <p class="mini-caption dim"><span id="mini-caption">—</span></p>
+      </div>
+
+      <div class="panel" id="leaderboard-panel">
+        <h2>Self-play leaderboard</h2>
+        <p class="legend">
+          6 networks · 2 games each per generation ·
+          <b>+1</b> win / <b>0</b> draw / <b>−2</b> loss.
+        </p>
+        <ol id="leaderboard">
+          <li class="placeholder">Waiting for first generation…</li>
+        </ol>
+      </div>
+    </section>
+  </section>
+
+  <section id="controls">
+    <button id="new-game">New game</button>
+    <button id="offer-draw" type="button">Offer draw</button>
+    <button id="resign" type="button" class="danger">Resign</button>
+    <label>
+      You play
+      <select id="human-color">
+        <option value="white">White (AI moves first)</option>
+        <option value="black">Black (you move first)</option>
+      </select>
+    </label>
+  </section>
+
+</main>
+
+<script src="js/checkers.js"></script>
+<script src="js/render.js"></script>
+<script src="js/network.js"></script>
+<script src="js/minimax.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
