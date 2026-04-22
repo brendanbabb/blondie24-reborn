@@ -37,7 +37,7 @@
   const humanColorSel = document.getElementById("human-color");
 
   const AI_DEPTH = 4;
-  const TRAIN_BURST_MS = 1000;   // evolution runs this long per AI turn
+  const TRAIN_BURST_MS = 2000;   // evolution runs this long per AI turn
   const MIN_SEARCH_PAD_MS = 200; // small UX pad so moves don't snap instantly
 
   const state = {

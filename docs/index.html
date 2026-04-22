@@ -20,18 +20,18 @@
         endgame database, and no backpropagation — only self-play under an
         evolutionary strategy. <a href="https://github.com/brendanbabb/blondie24-reborn" target="_blank" rel="noreferrer">Source on GitHub</a>.
       </p>
-      <p><b>Every AI turn, here's what happens in roughly one second:</b></p>
+      <p><b>Every AI turn, here's what happens in roughly two seconds:</b></p>
       <ol>
-        <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>3 self-play games</b> against random opponents from the group.</li>
-        <li>Games are scored <b>+1 win / 0 draw / −2 loss</b>. The top 3 networks survive; the bottom 3 are replaced by <b>Gaussian-mutated offspring</b> of the survivors.</li>
-        <li>That's <b>one generation</b>. The browser runs as many gens as it can fit into the second — typically 5–20 here. The Python version on a laptop runs ~3–5 gens/second at the same settings.</li>
-        <li>When the second is up, the current <b>top-ranked network</b> is handed depth-4 minimax and plays the move against you. The snapshot is frozen — it won't change while you think.</li>
+        <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>4 self-play games</b> against random opponents from the group, with each search going <b>4 plies deep</b> — the same depth used against you.</li>
+        <li>Games are scored <b>+1 win / 0 draw / −2 loss</b> (paper's asymmetric scoring). The top 3 networks survive; the bottom 3 are replaced by <b>Gaussian-mutated offspring</b> of the survivors.</li>
+        <li>That's <b>one generation</b>. The browser runs as many gens as fit into those two seconds — typically 3–10 at these settings.</li>
+        <li>Time's up. The current <b>top-ranked network</b> runs depth-4 minimax from the board you see and plays a move. The snapshot is frozen — it doesn't change while you think.</li>
       </ol>
       <p>
         Evolution is paused during your turn, so the AI you face at any point was the fittest
-        in the last-completed tournament. Across ~30 AI turns in a game, the population typically
-        runs through <b>200–500 generations</b> — on the order of what the paper used to reach
-        Class-A play. Watch the generation counter climb and the network x-ray shift.
+        in the last-completed tournament. Across ~30 AI turns in a game, the population runs
+        through <b>~150–300 generations</b> — a substantial fraction of what the paper used to
+        reach Class-A play. Watch the generation counter climb and the network x-ray shift.
       </p>
     </details>
   </header>
