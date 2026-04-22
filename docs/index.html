@@ -11,23 +11,27 @@
   <header>
     <h1>Blondie24 Reborn</h1>
     <p class="subtitle">A checkers opponent that evolves while it plays you.</p>
-    <details id="about">
-      <summary>What am I looking at?</summary>
+    <details id="about" open>
+      <summary>What am I looking at? &nbsp;(how the 1-second evolve works)</summary>
       <p>
         A live re-implementation of Chellapilla &amp; Fogel's 1999 evolutionary
         checkers experiment: a 1,743-weight feedforward network that learns to
         play checkers with no hand-crafted evaluation, no opening book, no
         endgame database, and no backpropagation — only self-play under an
-        evolutionary strategy.
+        evolutionary strategy. <a href="https://github.com/brendanbabb/blondie24-reborn" target="_blank" rel="noreferrer">Source on GitHub</a>.
       </p>
+      <p><b>Every AI turn, here's what happens in roughly one second:</b></p>
+      <ol>
+        <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>3 self-play games</b> against random opponents from the group.</li>
+        <li>Games are scored <b>+1 win / 0 draw / −2 loss</b>. The top 3 networks survive; the bottom 3 are replaced by <b>Gaussian-mutated offspring</b> of the survivors.</li>
+        <li>That's <b>one generation</b>. The browser runs as many gens as it can fit into the second — typically 5–20 here. The Python version on a laptop runs ~3–5 gens/second at the same settings.</li>
+        <li>When the second is up, the current <b>top-ranked network</b> is handed depth-4 minimax and plays the move against you. The snapshot is frozen — it won't change while you think.</li>
+      </ol>
       <p>
-        Every time the AI moves, it evolves for <strong>one second</strong>
-        first: its population of 6 networks plays a self-play tournament, the
-        best survives, and that snapshot plays the move against you. Across
-        ~30 AI turns in a single game, the population runs through
-        hundreds of generations — more than the paper's reported 250 for
-        Class-A play — all in the time it takes to play one game.
-        <a href="https://github.com/brendanbabb/blondie24-reborn" target="_blank" rel="noreferrer">Source on GitHub</a>.
+        Evolution is paused during your turn, so the AI you face at any point was the fittest
+        in the last-completed tournament. Across ~30 AI turns in a game, the population typically
+        runs through <b>200–500 generations</b> — on the order of what the paper used to reach
+        Class-A play. Watch the generation counter climb and the network x-ray shift.
       </p>
     </details>
   </header>

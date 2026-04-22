@@ -28,10 +28,10 @@ const C = self.Checkers;
 const N = self.Network;
 const M = self.Minimax;
 
-// Demo-tuned EP hyperparameters — smaller than paper for responsiveness.
+// Demo-tuned EP hyperparameters — smaller than paper for browser responsiveness.
 const POP_SIZE = 6;
-const GAMES_PER_INDIVIDUAL = 2;   // paper uses 5; 2 is enough at pop=6 to rank reliably-ish
-const TRAIN_SEARCH_DEPTH = 2;     // self-play search depth during evolution
+const GAMES_PER_INDIVIDUAL = 3;   // paper uses 5; at pop=6 this is enough for reliable ranking
+const TRAIN_SEARCH_DEPTH = 3;     // self-play search depth during evolution (game-play uses 4)
 const MAX_GAME_MOVES = 100;       // move cap for self-play games
 
 const WIN_SCORE = 1.0;
