@@ -37,10 +37,14 @@ def _build_fast_agents(population: Population, search_config: SearchConfig):
 
     Numba is imported lazily so environments that can't load the numba
     DLLs (e.g. WDAC-blocked Windows) can still use the torch-based paths.
+
+    `search_config.disable_quiescence` flips quiescence off (paper-strict
+    mode); otherwise the JIT agents keep their default quiescence-on behavior.
     """
     arch = getattr(population.net_config, "architecture", "checkersnet-1999")
     AgentCls = _fast_agent_class_for(arch)
-    return [AgentCls(ind.weights, search_config.depth)
+    use_q = not getattr(search_config, "disable_quiescence", False)
+    return [AgentCls(ind.weights, search_config.depth, use_quiescence=use_q)
             for ind in population.individuals]
 
 
@@ -90,21 +94,28 @@ def _mp_worker_init():
 def _mp_play_one(task):
     """
     Play a single game inside a worker. Task is a tuple:
-        (pair_id, black_weights, white_weights, depth, max_moves)
+        (pair_id, black_weights, white_weights, depth, max_moves, use_quiescence)
     Returns (pair_id, winner_int, moves, reason) — a flat picklable tuple.
     winner_int: 1=black, -1=white, 0=draw.
 
     Architecture is auto-detected from weight-vector length so the task
     tuple stays small: 1743 -> 1999, 5048 -> Anaconda 2001.
+
+    Older task tuples without `use_quiescence` are tolerated (fall back to
+    True = engine default) so mid-run resumes from older code paths work.
     """
     from neural.network import architecture_from_weight_count
-    pair_id, black_w, white_w, depth, max_moves = task
+    if len(task) == 6:
+        pair_id, black_w, white_w, depth, max_moves, use_q = task
+    else:
+        pair_id, black_w, white_w, depth, max_moves = task
+        use_q = True
     black_arch = architecture_from_weight_count(len(black_w))
     white_arch = architecture_from_weight_count(len(white_w))
     BlackCls = _fast_agent_class_for(black_arch)
     WhiteCls = _fast_agent_class_for(white_arch)
-    black = BlackCls(black_w, depth)
-    white = WhiteCls(white_w, depth)
+    black = BlackCls(black_w, depth, use_quiescence=use_q)
+    white = WhiteCls(white_w, depth, use_quiescence=use_q)
     result = play_game(black, white, max_moves=max_moves)
     w = result.winner
     winner_int = 0 if w is None else int(w)
@@ -193,13 +204,14 @@ def random_pairing_tournament(
     tasks = []
     pair_map = []  # pair_id -> (player_idx, opponent_idx, player_is_black)
     depth = search_config.depth
+    use_q = not getattr(search_config, "disable_quiescence", False)
     for pair_id, (i, opp_idx, i_is_black) in enumerate(pairings):
         if i_is_black:
             black_w, white_w = pop[i].weights, pop[opp_idx].weights
         else:
             black_w, white_w = pop[opp_idx].weights, pop[i].weights
         pair_map.append((i, opp_idx, i_is_black))
-        tasks.append((pair_id, black_w, white_w, depth, max_moves))
+        tasks.append((pair_id, black_w, white_w, depth, max_moves, use_q))
 
     for pair_id, winner_int, _n_moves, _reason in pool.imap_unordered(
         _mp_play_one, tasks, chunksize=8
@@ -276,20 +288,21 @@ def round_robin_tournament(
                                 player_is_black=True, config=evolution_config)
         return
 
-    # Build picklable task list: (pair_id, black_w, white_w, depth, max_moves)
+    # Build picklable task list: (pair_id, black_w, white_w, depth, max_moves, use_q)
     tasks = []
     pair_map = []  # pair_id -> (black_idx, white_idx)
     depth = search_config.depth
+    use_q = not getattr(search_config, "disable_quiescence", False)
     for i in range(len(pop)):
         for j in range(i + 1, len(pop)):
             pair_map.append((i, j))
             tasks.append((len(pair_map) - 1,
                           pop[i].weights, pop[j].weights,
-                          depth, max_moves))
+                          depth, max_moves, use_q))
             pair_map.append((j, i))
             tasks.append((len(pair_map) - 1,
                           pop[j].weights, pop[i].weights,
-                          depth, max_moves))
+                          depth, max_moves, use_q))
 
     # Use imap_unordered for slight throughput gain and to surface errors early.
     for pair_id, winner_int, n_moves, reason in pool.imap_unordered(

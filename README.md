@@ -30,6 +30,40 @@ That's pop=15, 5 games per individual per generation vs. randomly chosen opponen
 minimax, +1/0/−2 scoring, initial σ = 0.05, random pairing, no σ ceiling. Explicit flags still win,
 so `--preset paper-1999 --depth 6` keeps depth 6 while applying the rest.
 
+### Strict paper reproduction (for time comparisons)
+
+The `paper-2001` preset above matches the paper's **hyperparameters** but uses two engine
+accelerations not in the original: (1) half-keep-mutate selection (top 50% spawn offspring to
+refill) instead of the paper's (μ+μ) scheme; and (2) quiescence-extended alpha-beta instead
+of plain depth-4 alpha-beta. To turn **both** off and run a true paper copy:
+
+```bash
+python -m training.train --preset paper-2001-strict --generations 850 --workers 20 --device cpu
+```
+
+Individual flags if you want to isolate one deviation at a time:
+
+- `--selection-scheme mu_plus_mu` — every parent spawns one offspring, the 2μ pool is
+  evaluated, top μ survive. Paper-faithful (Chellapilla & Fogel 1999/2001). Roughly doubles
+  tournament compute per generation.
+- `--no-quiescence` — disable the quiescence extension in the CPU JIT engines. Shorter
+  per-position search, smaller JIT warmup.
+
+Head-to-head, 850 generations, 20 CPU workers on a 24-core box:
+
+| | `paper-2001` | `paper-2001-strict` |
+|---|---|---|
+| Wall time (850 gens) | 39.9 min | 47.1 min (+18%) |
+| Gens 2+ avg | 2.70 s | 3.25 s |
+| JIT warmup (gen 1) | 100.5 s | 62.9 s |
+| Late mean pop fitness | −1.24 | **−0.72** |
+| Late best losses/gen | 0.11 | **0.04** |
+
+The (μ+μ) selection keeps strong parents in the evaluation pool alongside offspring, which
+raises the population's mean fitness and tightens elite consistency. The quiescence-off
+per-search speedup compensates for most of the 2× tournament work, so true-paper fidelity
+costs only about 7 extra minutes per 850 generations.
+
 ---
 
 ## Architecture Overview

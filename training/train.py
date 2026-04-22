@@ -121,6 +121,11 @@ def train(config: Config):
           f"{config.evolution.loss_score:+.1f}")
     print(f"  Initial sigma:    {config.evolution.initial_sigma:.3f}")
     print(f"  Max sigma:        {config.evolution.max_sigma:.3f}")
+    scheme = getattr(config.evolution, "selection_scheme", "half_keep_mutate")
+    scheme_label = "(mu+mu) paper-strict" if scheme == "mu_plus_mu" else "half-keep-mutate"
+    print(f"  Selection:        {scheme_label}")
+    quiescence_on = not getattr(config.search, "disable_quiescence", False)
+    print(f"  Quiescence:       {'ON' if quiescence_on else 'OFF (plain alpha-beta)'}")
     print(f"  Device:           {device}")
     if device.type == "cuda":
         mem = gpu_memory_report()
@@ -181,6 +186,7 @@ def train(config: Config):
 
     start_gen = population.generation
     end_gen = start_gen + config.training.generations
+    scheme = getattr(config.evolution, "selection_scheme", "half_keep_mutate")
     for gen in range(start_gen + 1, end_gen + 1):
         gen_start = time.time()
 
@@ -190,6 +196,12 @@ def train(config: Config):
             print(f"  [curriculum] gen {gen}: depth {current_depth} -> {scheduled_depth}")
             current_depth = scheduled_depth
             config.search.depth = scheduled_depth
+
+        # === (mu+mu) expansion: each parent spawns one offspring BEFORE the ===
+        # tournament, so the tournament evaluates the combined 2*mu pool. This
+        # is the paper-faithful EP flow (Chellapilla & Fogel 1999/2001).
+        if scheme == "mu_plus_mu":
+            population.spawn_offspring_from_parents()
 
         # === Tournament: evaluate fitness ===
         tournament_kwargs = dict(
@@ -202,7 +214,8 @@ def train(config: Config):
             **tournament_kwargs,
         )
 
-        # Get stats before selection
+        # Get stats before selection. Note: in mu_plus_mu mode stats span all
+        # 2*mu individuals (the full tournament pool), not just the mu survivors.
         stats = population.stats()
         gen_time = time.time() - gen_start
         stats["time_seconds"] = round(gen_time, 2)
@@ -234,12 +247,21 @@ def train(config: Config):
         with open(log_path, "a") as f:
             f.write(json.dumps(stats) + "\n")
 
+        # === Selection ===
+        # In mu_plus_mu mode, trim to top mu BEFORE checkpointing so the saved
+        # state is mu individuals (not the 2*mu eval pool). In half_keep_mutate
+        # mode, selection happens after the checkpoint (existing behavior).
+        if scheme == "mu_plus_mu":
+            population.keep_top_mu()
+
         # === Checkpoint ===
         if gen % config.training.checkpoint_every == 0:
             _save_checkpoint(population, config, gen)
 
-        # === Selection + reproduction ===
-        population.select_and_reproduce()
+        # === Reproduction (half_keep_mutate only — mu_plus_mu mutates at ===
+        # the top of the next iteration via spawn_offspring_from_parents).
+        if scheme == "half_keep_mutate":
+            population.select_and_reproduce()
 
         # Periodic GPU cache cleanup
         if device.type == "cuda" and gen % 10 == 0:
@@ -354,13 +376,30 @@ def main():
                              "the 5,048-weight sub-board-preprocessor net from the "
                              "2001 paper. Both run on CPU (Numba JIT) and CUDA (torch).")
     parser.add_argument("--preset", type=str, default=None,
-                        choices=["paper-1999", "paper-2001"],
+                        choices=["paper-1999", "paper-2001", "paper-2001-strict"],
                         help="Named config preset. 'paper-1999' matches Chellapilla "
                              "& Fogel 1999: pop=15, games=5, depth=4, random pairing, "
                              "+1/0/-2 scoring, initial sigma 0.05, no sigma ceiling. "
                              "'paper-2001' switches to the Anaconda architecture with "
-                             "the same EP hyperparameters. Explicit CLI flags still "
-                             "win over the preset.")
+                             "the same EP hyperparameters. 'paper-2001-strict' is "
+                             "paper-2001 PLUS true paper fidelity: (mu+mu) selection "
+                             "(every parent spawns an offspring, 2*mu pool evaluated, "
+                             "top mu kept) and plain alpha-beta at depth 4 (no "
+                             "quiescence extensions). Use this for time-comparison "
+                             "runs against the engine-accelerated paper-2001. "
+                             "Explicit CLI flags still win over the preset.")
+    parser.add_argument("--selection-scheme", type=str, default=None,
+                        choices=["half_keep_mutate", "mu_plus_mu"],
+                        help="Selection scheme. 'half_keep_mutate' (default) keeps "
+                             "top 50%% as parents and mutates them to refill - "
+                             "evaluates mu individuals per gen. 'mu_plus_mu' is the "
+                             "paper-faithful (mu+mu) EP: every parent spawns one "
+                             "offspring, 2*mu pool is evaluated in the tournament, "
+                             "top mu survive. Doubles tournament compute per gen.")
+    parser.add_argument("--no-quiescence", action="store_true",
+                        help="Disable quiescence search in the CPU JIT engines "
+                             "(plain alpha-beta at --depth). Matches the paper's "
+                             "search; default leaves quiescence on.")
     args = parser.parse_args()
 
     # Presets fill args the user didn't set explicitly. Applied before resume
@@ -397,6 +436,29 @@ def main():
               "arch=anaconda-2001, pop=15, games=5, depth=4, random pairing, "
               "+1/0/-2, sigma=0.05, no sigma ceiling. "
               "NOTE: paper ran 840 gens for expert strength; default 250 here.")
+    elif args.preset == "paper-2001-strict":
+        paper_defaults = {
+            "architecture": "anaconda-2001",
+            "depth": 4,
+            "games": 5,
+            "loss_score": -2.0,
+            "win_score": 1.0,
+            "initial_sigma": 0.05,
+            "max_sigma": float("inf"),
+        }
+        for attr, val in paper_defaults.items():
+            if getattr(args, attr) is None:
+                setattr(args, attr, val)
+        # Paper-strict additions: (μ+μ) selection and plain alpha-beta.
+        if args.selection_scheme is None:
+            args.selection_scheme = "mu_plus_mu"
+        if not args.no_quiescence:
+            args.no_quiescence = True
+        print("  [preset] paper-2001-strict (true Chellapilla & Fogel 2001 copy) - "
+              "arch=anaconda-2001, pop=15, games=5, depth=4, random pairing, "
+              "+1/0/-2, sigma=0.05, no sigma ceiling, "
+              "selection=(mu+mu) (2*mu pool each gen), quiescence=OFF. "
+              "Expect ~2x the tournament compute per gen vs paper-2001.")
 
     # === Resume: adopt hyperparameters saved in the checkpoint unless the ===
     # user explicitly overrode them on the CLI. Keeps resumed runs faithful
@@ -488,6 +550,10 @@ def main():
         config.evolution.max_sigma = args.max_sigma
     config.training.resume_from = args.resume
     config.training.tournament = args.tournament
+    if args.selection_scheme is not None:
+        config.evolution.selection_scheme = args.selection_scheme
+    if args.no_quiescence:
+        config.search.disable_quiescence = True
     config.training.depth_schedule = _parse_depth_schedule(args.depth_schedule)
     if config.training.depth_schedule:
         # Seed config.search.depth with the schedule's first entry so the

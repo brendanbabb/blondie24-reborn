@@ -111,6 +111,31 @@ class Population:
         
         return self.individuals
     
+    def spawn_offspring_from_parents(self) -> list[Individual]:
+        """
+        (mu+mu) step 1: every parent spawns one mutated offspring. Population
+        grows from mu to 2*mu; the tournament then evaluates all 2*mu together.
+        Called BEFORE the tournament when selection_scheme == 'mu_plus_mu'.
+        """
+        offspring = [mutate(p, self.config) for p in self.individuals]
+        self.individuals = list(self.individuals) + offspring
+        return self.individuals
+
+    def keep_top_mu(self) -> list[Individual]:
+        """
+        (mu+mu) step 3: rank the 2*mu tournament pool and keep the top mu as
+        parents for the next generation. Called AFTER the tournament when
+        selection_scheme == 'mu_plus_mu'. Increments generation counter.
+        """
+        n_keep = self.config.population_size
+        ranked = sorted(self.individuals, key=lambda ind: ind.fitness, reverse=True)
+        self.individuals = [
+            Individual(weights=ind.weights.copy(), sigmas=ind.sigmas.copy())
+            for ind in ranked[:n_keep]
+        ]
+        self.generation += 1
+        return self.individuals
+
     def best_individual(self) -> Individual:
         """Return the individual with the highest fitness."""
         return max(self.individuals, key=lambda ind: ind.fitness)

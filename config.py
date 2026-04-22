@@ -45,10 +45,15 @@ class SearchConfig:
     """Minimax search parameters."""
     depth: int = 4              # ply depth (original used 4; try 6-8 with GPU)
     use_alpha_beta: bool = True # always use alpha-beta pruning
-    
+
     # Quiescence: if a capture is available at leaf, extend search
     quiescence_enabled: bool = False  # optional enhancement
     quiescence_max_depth: int = 2     # extra ply for captures only
+
+    # Opt-in: turn off quiescence in the CPU JIT engines to match the paper's
+    # plain alpha-beta at depth 4 (Chellapilla & Fogel 1999/2001). Default False
+    # leaves the engines in their current behavior (quiescence on).
+    disable_quiescence: bool = False
 
 
 @dataclass
@@ -56,9 +61,14 @@ class EvolutionConfig:
     """Evolutionary strategy parameters — from Fogel's EP approach."""
     population_size: int = 15       # original used 15 (small!)
     games_per_individual: int = 5   # games each network plays per generation
-    
-    # Selection
-    keep_fraction: float = 0.5      # top 50% survive
+
+    # Selection scheme. "half_keep_mutate" is the existing behavior (top
+    # keep_fraction survives, spawns mutated offspring to refill to μ).
+    # "mu_plus_mu" is the paper-faithful (μ+μ) EP: every parent spawns one
+    # offspring, combined 2μ pool is evaluated in the tournament, top μ
+    # survive. Opt-in via --selection-scheme or --preset paper-2001-strict.
+    selection_scheme: str = "half_keep_mutate"
+    keep_fraction: float = 0.5      # top 50% survive (half_keep_mutate only)
     
     # Mutation — self-adaptive step sizes
     # Each weight has its own σ (step size), also evolved
