@@ -298,59 +298,6 @@
     }
   }
 
-  function appendFingerprint(gen, weights) {
-    // 32 values: input-to-first-hidden-unit weights. In the flat layout, W1
-    // is [40 × 32] row-major starting at offset 0, so h[0]'s inputs are the
-    // first 32 entries of the weights vector.
-    const vals = new Float32Array(32);
-    for (let i = 0; i < 32; i++) vals[i] = weights[i];
-    // Normalize magnitude for display (95th percentile-ish).
-    let absMax = 1e-6;
-    for (let i = 0; i < 32; i++) absMax = Math.max(absMax, Math.abs(vals[i]));
-
-    const wrap = document.createElement("div");
-    wrap.className = "fp";
-    wrap.title = `gen ${gen}`;
-    const cvs = document.createElement("canvas");
-    const CELL = 7, COLS = 8, ROWS = 4;
-    cvs.width = COLS * CELL;
-    cvs.height = ROWS * CELL;
-    const g = cvs.getContext("2d");
-    for (let i = 0; i < 32; i++) {
-      // Lay out 32 values as 4 rows × 8 cols. The checkers encoding numbers
-      // dark squares 0..31 left-to-right, top-to-bottom; we mirror that.
-      const row = Math.floor(i / 8);
-      const col = i % 8;
-      const t = Math.max(-1, Math.min(1, vals[i] / absMax));
-      g.fillStyle = diverging(t);
-      g.fillRect(col * CELL, row * CELL, CELL, CELL);
-    }
-    const label = document.createElement("span");
-    label.className = "fp-label";
-    label.textContent = "g" + gen;
-    wrap.appendChild(cvs);
-    wrap.appendChild(label);
-
-    const strip = document.getElementById("fingerprints-strip");
-    strip.appendChild(wrap);
-    strip.scrollTop = strip.scrollHeight;
-  }
-
-  // Red-to-blue diverging color, domain [-1, +1]. Near 0 returns a dim panel
-  // color so "no weight" reads as background. Colorblind-safe palette.
-  function diverging(t) {
-    const a = Math.min(1, Math.abs(t));
-    if (a < 0.05) return "rgba(110, 120, 140, 0.4)";
-    if (t < 0) {
-      // red: stronger magnitude → more saturated
-      const r = Math.round(220 * a + 80 * (1 - a));
-      return `rgba(${r}, 90, 90, ${0.35 + 0.65 * a})`;
-    } else {
-      const b = Math.round(230 * a + 100 * (1 - a));
-      return `rgba(110, 150, ${b}, ${0.35 + 0.65 * a})`;
-    }
-  }
-
   function appendMoveHistory(actor, move, captured, extra) {
     const path = describeMove(move);
     const capMsg = captured && captured.length ? ` × ${captured.join(",")}` : "";
@@ -397,7 +344,6 @@
     Render.drawMini(miniCtx, C.makeBoard().squares, { size: miniSize });
     setMiniCaption("waiting for first self-play game…");
     moveHistoryEl.innerHTML = "";
-    document.getElementById("fingerprints-strip").innerHTML = "";
     // Clear the x-ray (no snapshot yet this game).
     const xrayCanvas = document.getElementById("xray");
     if (xrayCanvas) {
@@ -696,7 +642,6 @@
     try {
       state.aiNet = N.makeNetwork(snap.weights);
       log(`AI is moving (gen ${snap.gen})…`);
-      appendFingerprint(snap.gen, snap.weights);
       renderNetworkXray(snap.gen, snap.weights);
       updatePosEval();
       const searchStart = performance.now();
