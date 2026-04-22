@@ -61,7 +61,8 @@
     miniPlayback: null,   // { frames, step, timer }
     historyGens: [],      // cumulative per-gen fitness stats across the whole game
     turnBoundaries: [],   // generation numbers at which each AI turn started
-    prevXrayWeights: null, // last-turn snapshot, used for the diff panel
+    baselineXrayWeights: null, // first AI-turn snapshot, used as the "drift from" origin
+    baselineXrayGen: 0,
   };
 
   // ---- Worker setup ---------------------------------------------------------
@@ -290,23 +291,24 @@
       `weights · gen ${gen} · 95% abs={norm}`,
     );
 
-    // Diff: current minus previous AI-turn snapshot. Skip on the first turn.
-    // gamma < 1 brightens small deltas so mutation activity is visible even
-    // when 95% of the weights moved by a tiny amount.
-    const prev = state.prevXrayWeights;
-    if (prev && prev.length === weights.length) {
-      const delta = new Float32Array(weights.length);
-      for (let i = 0; i < weights.length; i++) delta[i] = weights[i] - prev[i];
+    // Drift: current minus the first AI-turn snapshot. On turn 1 we only
+    // stash the baseline; from turn 2 onward we render cumulative drift,
+    // which grows monotonically as evolution accumulates.
+    if (state.baselineXrayWeights === null) {
+      state.baselineXrayWeights = new Float32Array(weights);
+      state.baselineXrayGen = gen;
+    } else {
+      const drift = new Float32Array(weights.length);
+      for (let i = 0; i < weights.length; i++) {
+        drift[i] = weights[i] - state.baselineXrayWeights[i];
+      }
       paintWeightGrid(
-        "xray-diff", delta,
+        "xray-diff", drift,
         "xray-diff-caption",
-        `delta · gen ${gen} · 95% abs={norm}`,
-        { gamma: 0.45 },
+        `drift since gen ${state.baselineXrayGen} · 95% abs={norm}`,
+        { gamma: 0.55 },
       );
     }
-    // Stash a copy — the worker's snapshot buffers get reused across turns
-    // if we kept a reference.
-    state.prevXrayWeights = new Float32Array(weights);
   }
 
   // Diverging red-to-blue, returns [r, g, b] in 0..255. Bright endpoints,
@@ -379,9 +381,9 @@
     Render.drawMini(miniCtx, C.makeBoard().squares, { size: miniSize });
     setMiniCaption("waiting for first self-play game…");
     moveHistoryEl.innerHTML = "";
-    // Clear the x-ray canvases (no snapshot yet this game) and the stashed
-    // previous-weights used for the diff panel.
-    state.prevXrayWeights = null;
+    // Clear the x-ray canvases and the stashed baseline used for the drift panel.
+    state.baselineXrayWeights = null;
+    state.baselineXrayGen = 0;
     for (const id of ["xray", "xray-diff"]) {
       const c = document.getElementById(id);
       if (!c) continue;
@@ -390,7 +392,7 @@
       g.fillRect(0, 0, c.width, c.height);
     }
     document.getElementById("xray-caption").textContent = "weights — awaiting first move…";
-    document.getElementById("xray-diff-caption").textContent = "delta — awaiting second move…";
+    document.getElementById("xray-diff-caption").textContent = "drift — awaiting second move…";
     renderHistoryChart();
 
     // Send the worker back to gen 0 for a fresh run.
