@@ -140,21 +140,36 @@
       ol.innerHTML = "<li class=\"placeholder\">Waiting for first generation…</li>";
       return;
     }
-    const maxAbs = Math.max(1, ...entries.map(e => Math.abs(e.fitness)));
     const allZero = entries.every(e => e.fitness === 0 && e.wins === 0 && e.losses === 0 && e.draws === 0);
     if (allZero) {
       ol.innerHTML = "<li class=\"placeholder\">Population initialized. Run a generation to rank them…</li>";
       return;
     }
-    const html = entries.map((e, rank) => {
-      const pct = (Math.abs(e.fitness) / maxAbs) * 100;
-      const side = e.fitness >= 0 ? "pos" : "neg";
-      const wld = `${e.wins}/${e.losses}/${e.draws}`;
-      return `<li>
-        <span class="rank">#${rank + 1}</span>
+
+    // Group by identical (wins, losses, draws) — individuals with the same
+    // record share a fitness (scoring is deterministic from W/L/D), so we
+    // collapse them into one row with an "×N" count badge on the left.
+    const groups = new Map();
+    for (const e of entries) {
+      const key = `${e.wins},${e.losses},${e.draws}`;
+      let g = groups.get(key);
+      if (!g) {
+        g = { wins: e.wins, losses: e.losses, draws: e.draws, fitness: e.fitness, count: 0 };
+        groups.set(key, g);
+      }
+      g.count += 1;
+    }
+    const rows = Array.from(groups.values()).sort((a, b) => b.fitness - a.fitness);
+    const maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.fitness)));
+
+    const html = rows.map((r) => {
+      const pct = (Math.abs(r.fitness) / maxAbs) * 100;
+      const side = r.fitness >= 0 ? "pos" : "neg";
+      return `<li class="group">
+        <span class="rank">×${r.count}</span>
         <span class="bar"><div class="${side}" style="transform: scaleX(${(pct / 100).toFixed(3)})"></div></span>
-        <span class="score">${e.fitness >= 0 ? "+" : ""}${e.fitness.toFixed(1)}</span>
-        <span class="wld" title="wins/losses/draws">${wld}</span>
+        <span class="score">${r.fitness >= 0 ? "+" : ""}${r.fitness.toFixed(1)}</span>
+        <span class="wld" title="wins/losses/draws">${r.wins}w·${r.losses}l·${r.draws}d</span>
       </li>`;
     }).join("");
     ol.innerHTML = html;

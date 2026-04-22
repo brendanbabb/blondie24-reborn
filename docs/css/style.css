@@ -254,11 +254,21 @@ canvas#board {
 
 #leaderboard li {
   display: grid;
-  grid-template-columns: 28px 1fr 50px 60px;
+  grid-template-columns: 34px 1fr 46px 70px;
   gap: 8px;
   align-items: center;
   padding: 4px 0;
   font-family: "SFMono-Regular", Consolas, monospace;
+}
+#leaderboard li.group .rank {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 4px;
+  text-align: center;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
 }
 #leaderboard li.placeholder {
   display: block;
