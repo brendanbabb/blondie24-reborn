@@ -242,7 +242,11 @@
     capEl.textContent = `gen 1 — ${maxGen} · best ${hi >= 0 ? "+" : ""}${hi.toFixed(1)} · ${state.turnBoundaries.length} AI turn${state.turnBoundaries.length === 1 ? "" : "s"}`;
   }
 
-  function paintWeightGrid(canvasId, vector, captionId, captionText) {
+  function paintWeightGrid(canvasId, vector, captionId, captionText, opts) {
+    opts = opts || {};
+    // gamma < 1 brightens mid-magnitude values without changing sign; used on
+    // the diff panel where most cells are small but some are interesting.
+    const gamma = opts.gamma != null ? opts.gamma : 1.0;
     const canvas = document.getElementById(canvasId);
     const g = canvas.getContext("2d");
     const W = canvas.width;   // 42
@@ -260,8 +264,9 @@
     for (let i = 0; i < W * H; i++) {
       const px = i * 4;
       if (i < n) {
-        const t = Math.max(-1, Math.min(1, vector[i] / norm));
-        const c = divergingRGB(t);
+        const raw = Math.max(-1, Math.min(1, vector[i] / norm));
+        const boosted = Math.sign(raw) * Math.pow(Math.abs(raw), gamma);
+        const c = divergingRGB(boosted);
         img.data[px] = c[0];
         img.data[px + 1] = c[1];
         img.data[px + 2] = c[2];
@@ -286,6 +291,8 @@
     );
 
     // Diff: current minus previous AI-turn snapshot. Skip on the first turn.
+    // gamma < 1 brightens small deltas so mutation activity is visible even
+    // when 95% of the weights moved by a tiny amount.
     const prev = state.prevXrayWeights;
     if (prev && prev.length === weights.length) {
       const delta = new Float32Array(weights.length);
@@ -294,6 +301,7 @@
         "xray-diff", delta,
         "xray-diff-caption",
         `delta · gen ${gen} · 95% abs={norm}`,
+        { gamma: 0.45 },
       );
     }
     // Stash a copy — the worker's snapshot buffers get reused across turns
@@ -301,22 +309,26 @@
     state.prevXrayWeights = new Float32Array(weights);
   }
 
-  // Diverging red-to-blue, returns [r, g, b] in 0..255. Mirrors the `diverging`
-  // CSS helper but outputs raw RGB for ImageData pixels (no alpha blending).
+  // Diverging red-to-blue, returns [r, g, b] in 0..255. Bright endpoints,
+  // dim-but-still-readable center. Colorblind-safe (red / blue, no green).
   function divergingRGB(t) {
     const a = Math.min(1, Math.abs(t));
-    if (a < 0.03) return [90, 100, 120];
+    // Dead zone — render as a touch above the panel background so "no change"
+    // still reads as "I'm looking at a cell," just not a bright one.
+    if (a < 0.02) return [95, 105, 125];
     if (t < 0) {
+      // red ramp: (95, 105, 125) → (255, 50, 50)
       return [
-        Math.round(80 + 150 * a),
-        Math.round(80 - 30 * a),
-        Math.round(80 - 30 * a),
+        Math.round(95 + 160 * a),
+        Math.round(105 - 55 * a),
+        Math.round(125 - 75 * a),
       ];
     } else {
+      // blue ramp: (95, 105, 125) → (60, 160, 255)
       return [
-        Math.round(95 - 20 * a),
-        Math.round(110 + 40 * a),
-        Math.round(120 + 120 * a),
+        Math.round(95 - 35 * a),
+        Math.round(105 + 55 * a),
+        Math.round(125 + 130 * a),
       ];
     }
   }
