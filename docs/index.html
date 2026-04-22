@@ -108,11 +108,22 @@
       <div class="panel" id="history-panel">
         <h2>Training arc this game</h2>
         <p class="legend">
-          Best (yellow) and mean (gray) fitness per generation across every
-          AI turn so far. Vertical ticks mark the start of each AI turn.
+          Best (yellow) and mean (gray) fitness per generation. Ticks mark
+          where each AI turn began.
         </p>
-        <canvas id="history-chart" width="280" height="140"></canvas>
+        <canvas id="history-chart" width="280" height="110"></canvas>
         <p class="dim" id="history-caption" style="margin: 4px 0 0; text-align: center;">—</p>
+      </div>
+
+      <div class="panel" id="fingerprints-panel">
+        <h2>Network fingerprints</h2>
+        <p class="legend">
+          One badge per AI turn. Each 4×8 grid maps to the 32 dark squares
+          and shows how much the first hidden neuron weights each square —
+          <b style="color:#ff9a8a">red</b> negative, <b style="color:#7fb8ff">blue</b> positive,
+          dim = near zero. Watch it shift as the population evolves.
+        </p>
+        <div id="fingerprints-strip"></div>
       </div>
     </aside>
 

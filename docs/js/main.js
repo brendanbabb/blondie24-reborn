@@ -241,6 +241,59 @@
     capEl.textContent = `gen 1 — ${maxGen} · best ${hi >= 0 ? "+" : ""}${hi.toFixed(1)} · ${state.turnBoundaries.length} AI turn${state.turnBoundaries.length === 1 ? "" : "s"}`;
   }
 
+  function appendFingerprint(gen, weights) {
+    // 32 values: input-to-first-hidden-unit weights. In the flat layout, W1
+    // is [40 × 32] row-major starting at offset 0, so h[0]'s inputs are the
+    // first 32 entries of the weights vector.
+    const vals = new Float32Array(32);
+    for (let i = 0; i < 32; i++) vals[i] = weights[i];
+    // Normalize magnitude for display (95th percentile-ish).
+    let absMax = 1e-6;
+    for (let i = 0; i < 32; i++) absMax = Math.max(absMax, Math.abs(vals[i]));
+
+    const wrap = document.createElement("div");
+    wrap.className = "fp";
+    wrap.title = `gen ${gen}`;
+    const cvs = document.createElement("canvas");
+    const CELL = 7, COLS = 8, ROWS = 4;
+    cvs.width = COLS * CELL;
+    cvs.height = ROWS * CELL;
+    const g = cvs.getContext("2d");
+    for (let i = 0; i < 32; i++) {
+      // Lay out 32 values as 4 rows × 8 cols. The checkers encoding numbers
+      // dark squares 0..31 left-to-right, top-to-bottom; we mirror that.
+      const row = Math.floor(i / 8);
+      const col = i % 8;
+      const t = Math.max(-1, Math.min(1, vals[i] / absMax));
+      g.fillStyle = diverging(t);
+      g.fillRect(col * CELL, row * CELL, CELL, CELL);
+    }
+    const label = document.createElement("span");
+    label.className = "fp-label";
+    label.textContent = "g" + gen;
+    wrap.appendChild(cvs);
+    wrap.appendChild(label);
+
+    const strip = document.getElementById("fingerprints-strip");
+    strip.appendChild(wrap);
+    strip.scrollTop = strip.scrollHeight;
+  }
+
+  // Red-to-blue diverging color, domain [-1, +1]. Near 0 returns a dim panel
+  // color so "no weight" reads as background. Colorblind-safe palette.
+  function diverging(t) {
+    const a = Math.min(1, Math.abs(t));
+    if (a < 0.05) return "rgba(110, 120, 140, 0.4)";
+    if (t < 0) {
+      // red: stronger magnitude → more saturated
+      const r = Math.round(220 * a + 80 * (1 - a));
+      return `rgba(${r}, 90, 90, ${0.35 + 0.65 * a})`;
+    } else {
+      const b = Math.round(230 * a + 100 * (1 - a));
+      return `rgba(110, 150, ${b}, ${0.35 + 0.65 * a})`;
+    }
+  }
+
   function appendMoveHistory(actor, move, captured, extra) {
     const path = describeMove(move);
     const capMsg = captured && captured.length ? ` × ${captured.join(",")}` : "";
@@ -287,6 +340,7 @@
     Render.drawMini(miniCtx, C.makeBoard().squares, { size: miniSize });
     setMiniCaption("waiting for first self-play game…");
     moveHistoryEl.innerHTML = "";
+    document.getElementById("fingerprints-strip").innerHTML = "";
     renderHistoryChart();
 
     // Send the worker back to gen 0 for a fresh run.
@@ -577,6 +631,7 @@
     try {
       state.aiNet = N.makeNetwork(snap.weights);
       log(`AI is moving (gen ${snap.gen})…`);
+      appendFingerprint(snap.gen, snap.weights);
       updatePosEval();
       const searchStart = performance.now();
       const result = M.pickMove(state.board, AI_DEPTH, state.aiNet);
@@ -636,6 +691,9 @@
     const frames = pb.game.frames;
     const squares = frames[pb.step];
     Render.drawMini(miniCtx, squares, { size: miniSize });
+    if (pb.step >= frames.length - 1) {
+      drawWinnerOverlay(miniCtx, miniSize, pb.game.winner);
+    }
     setMiniCaption(miniCaptionFor(pb.game, pb.step));
 
     pb.step += 1;
@@ -670,6 +728,30 @@
 
   function setMiniCaption(text) {
     document.getElementById("mini-caption").textContent = text;
+  }
+
+  function drawWinnerOverlay(ctx, size, winner) {
+    const text = winner === 1 ? "BLACK WINS" : winner === -1 ? "WHITE WINS" : "DRAW";
+    const bandHeight = Math.floor(size * 0.26);
+    const y = Math.floor((size - bandHeight) / 2);
+    ctx.save();
+    // Dimming veil so the board behind is still visible but subdued.
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.fillRect(0, 0, size, size);
+    // Band
+    ctx.fillStyle = winner === 1
+      ? "rgba(20, 20, 20, 0.92)"
+      : winner === -1
+        ? "rgba(230, 230, 230, 0.92)"
+        : "rgba(110, 120, 150, 0.92)";
+    ctx.fillRect(0, y, size, bandHeight);
+    // Text
+    ctx.fillStyle = winner === -1 ? "#1a1410" : "#ffffff";
+    ctx.font = "bold 18px -apple-system, Segoe UI, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, size / 2, size / 2);
+    ctx.restore();
   }
 
   function updateAiTimeDisplay() {
