@@ -136,9 +136,19 @@
     <section id="extras">
       <div class="panel" id="mini-panel">
         <h2>Self-play happening now</h2>
-        <p class="legend">A training game from the most recent generation, replayed while you think.</p>
-        <canvas id="mini-board" width="200" height="200"></canvas>
-        <p class="mini-caption dim"><span id="mini-caption">—</span></p>
+        <p class="legend">Two training games from the most recent generation, replayed while you think.</p>
+        <div class="mini-pair">
+          <div class="mini-cell">
+            <span class="mini-label">Game A</span>
+            <canvas id="mini-board-a" width="160" height="160"></canvas>
+            <p class="mini-caption dim"><span id="mini-caption-a">—</span></p>
+          </div>
+          <div class="mini-cell">
+            <span class="mini-label">Game B</span>
+            <canvas id="mini-board-b" width="160" height="160"></canvas>
+            <p class="mini-caption dim"><span id="mini-caption-b">—</span></p>
+          </div>
+        </div>
       </div>
 
       <div class="panel" id="leaderboard-panel">

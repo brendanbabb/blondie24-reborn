@@ -31,7 +31,7 @@ const M = self.Minimax;
 // Demo-tuned EP hyperparameters — smaller than paper for browser responsiveness.
 const POP_SIZE = 6;
 const GAMES_PER_INDIVIDUAL = 3;   // paper uses 5; at pop=6 this is enough for reliable ranking
-const TRAIN_SEARCH_DEPTH = 3;     // self-play search depth during evolution (game-play uses 4)
+const TRAIN_SEARCH_DEPTH = 4;     // self-play search depth during evolution (matches paper + game-play)
 const MAX_GAME_MOVES = 100;       // move cap for self-play games
 
 const WIN_SCORE = 1.0;
@@ -110,8 +110,9 @@ function playGame(black, white, record) {
 // wipes fitness, so the leaderboard shows meaningful numbers.
 let lastTournamentSnapshot = null;
 
-// One recorded self-play game per gen, for the replay panel.
-let _lastSampleGame = null;
+// Two recorded self-play games per gen, for the replay panel.
+let _lastSampleGameA = null;
+let _lastSampleGameB = null;
 
 // Run one full generation: tournament → rank → mutate offspring → advance.
 function runOneGen() {
@@ -127,24 +128,35 @@ function runOneGen() {
     }
   }
 
-  // Pick one pairing to record for the replay panel.
-  const sampleIdx = Math.floor(Math.random() * pairings.length);
-  let sampleGame = null;
+  // Pick two distinct pairings to record for the replay panel (Game A and
+  // Game B). If there are somehow fewer than 2 pairings, sampleIdxB stays
+  // -1 and nothing is recorded for B.
+  const sampleIdxA = Math.floor(Math.random() * pairings.length);
+  let sampleIdxB = -1;
+  if (pairings.length > 1) {
+    do {
+      sampleIdxB = Math.floor(Math.random() * pairings.length);
+    } while (sampleIdxB === sampleIdxA);
+  }
+  let sampleGameA = null;
+  let sampleGameB = null;
 
   for (let pi = 0; pi < pairings.length; pi++) {
     const p = pairings[pi];
-    const shouldRecord = pi === sampleIdx;
+    const shouldRecord = pi === sampleIdxA || pi === sampleIdxB;
     const black = p.aIsBlack ? population[p.a] : population[p.b];
     const white = p.aIsBlack ? population[p.b] : population[p.a];
     const result = playGame(black, white, shouldRecord);
     const winner = result.winner;
     if (shouldRecord) {
-      sampleGame = {
+      const recorded = {
         frames: result.frames,
         blackIdx: p.aIsBlack ? p.a : p.b,
         whiteIdx: p.aIsBlack ? p.b : p.a,
         winner: winner,
       };
+      if (pi === sampleIdxA) sampleGameA = recorded;
+      else sampleGameB = recorded;
     }
 
     const playerA = population[p.a];
@@ -166,7 +178,8 @@ function runOneGen() {
   }
 
   // Stash for the next gen event.
-  _lastSampleGame = sampleGame;
+  _lastSampleGameA = sampleGameA;
+  _lastSampleGameB = sampleGameB;
 
   // Capture the tournament standings BEFORE selection zeroes fitness.
   population.sort((x, y) => y.fitness - x.fitness);
@@ -232,7 +245,8 @@ function scheduleNext() {
       leaderboard: leaderboardSnapshot(),
       meanFitness: population.reduce((s, x) => s + x.fitness, 0) / POP_SIZE,
       maxFitness: Math.max.apply(null, population.map(x => x.fitness)),
-      sampleGame: _lastSampleGame,
+      sampleGameA: _lastSampleGameA,
+      sampleGameB: _lastSampleGameB,
     });
     scheduleNext();
   }, 0);
@@ -245,7 +259,8 @@ self.onmessage = function (ev) {
       running = false;
       if (nextTask) { clearTimeout(nextTask); nextTask = null; }
       lastTournamentSnapshot = null;
-      _lastSampleGame = null;
+      _lastSampleGameA = null;
+      _lastSampleGameB = null;
       initPopulation();
       postMessage({
         type: "gen",
@@ -253,7 +268,8 @@ self.onmessage = function (ev) {
         leaderboard: leaderboardSnapshot(),
         meanFitness: 0,
         maxFitness: 0,
-        sampleGame: null,
+        sampleGameA: null,
+        sampleGameB: null,
       });
       break;
     case "resume":

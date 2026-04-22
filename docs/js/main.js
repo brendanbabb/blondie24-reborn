@@ -22,9 +22,11 @@
 
   const canvas = document.getElementById("board");
   const ctx = canvas.getContext("2d");
-  const miniCanvas = document.getElementById("mini-board");
-  const miniCtx = miniCanvas.getContext("2d");
-  const miniSize = miniCanvas.width;
+  const miniCanvasA = document.getElementById("mini-board-a");
+  const miniCanvasB = document.getElementById("mini-board-b");
+  const miniCtxA = miniCanvasA.getContext("2d");
+  const miniCtxB = miniCanvasB.getContext("2d");
+  const miniSize = miniCanvasA.width;   // both panels share this size
   const moveLog = document.getElementById("move-log");
   const moveHistoryEl = document.getElementById("move-history");
   const historyCanvas = document.getElementById("history-chart");
@@ -57,8 +59,10 @@
     aiEvolveMs: 0,     // cumulative training-burst time across all AI turns
     aiSearchMs: 0,     // cumulative minimax-search time across all AI turns
     aiMoveCount: 0,    // AI moves committed this game
-    latestSampleGame: null,
-    miniPlayback: null,   // { frames, step, timer }
+    latestSampleGameA: null,
+    latestSampleGameB: null,
+    miniPlaybackA: null,   // { game, step, finished, timer }
+    miniPlaybackB: null,
     historyGens: [],      // cumulative per-gen fitness stats across the whole game
     turnBoundaries: [],   // generation numbers at which each AI turn started
     baselineXrayWeights: null, // first AI-turn snapshot, used as the "drift from" origin
@@ -110,12 +114,8 @@
       }
       document.getElementById("gen-counter").textContent = "gen " + msg.gen;
       renderLeaderboard(msg.leaderboard);
-      if (msg.sampleGame) {
-        state.latestSampleGame = msg.sampleGame;
-        if (!state.aiThinking && (!state.miniPlayback || state.miniPlayback.finished)) {
-          startMiniPlayback();
-        }
-      }
+      if (msg.sampleGameA) state.latestSampleGameA = msg.sampleGameA;
+      if (msg.sampleGameB) state.latestSampleGameB = msg.sampleGameB;
       return;
     }
     if (msg.type === "snapshot") {
@@ -374,12 +374,16 @@
     state.aiEvolveMs = 0;
     state.aiSearchMs = 0;
     state.aiMoveCount = 0;
-    state.latestSampleGame = null;
+    state.latestSampleGameA = null;
+    state.latestSampleGameB = null;
     state.historyGens = [];
     state.turnBoundaries = [];
-    stopMiniPlayback();
-    Render.drawMini(miniCtx, C.makeBoard().squares, { size: miniSize });
-    setMiniCaption("waiting for first self-play game…");
+    stopAllMiniPlaybacks();
+    const startingSquares = C.makeBoard().squares;
+    Render.drawMini(miniCtxA, startingSquares, { size: miniSize });
+    Render.drawMini(miniCtxB, startingSquares, { size: miniSize });
+    document.getElementById("mini-caption-a").textContent = "waiting for first self-play game…";
+    document.getElementById("mini-caption-b").textContent = "waiting for first self-play game…";
     moveHistoryEl.innerHTML = "";
     // Clear the x-ray canvases and the stashed baseline used for the drift panel.
     state.baselineXrayWeights = null;
@@ -649,8 +653,9 @@
     state._evolveStart = performance.now();
     // Pause the mini replay while the AI trains — we'll start a fresh one
     // (from this turn's games) as soon as the AI has finished moving.
-    stopMiniPlayback();
-    setMiniCaption("AI is training — new self-play games in progress…");
+    stopAllMiniPlaybacks();
+    document.getElementById("mini-caption-a").textContent = "AI is training — new games in progress…";
+    document.getElementById("mini-caption-b").textContent = "AI is training — new games in progress…";
     log("AI is training…");
     updateButtons();
 
@@ -703,8 +708,8 @@
           return;
         }
         commitMove(result.move, `AI gen ${snap.gen}`);
-        if (!state.finished && state.latestSampleGame) {
-          startMiniPlayback();
+        if (!state.finished && (state.latestSampleGameA || state.latestSampleGameB)) {
+          startAllMiniPlaybacks();
         }
         updateButtons();
       }, pad);
@@ -715,56 +720,85 @@
     }
   }
 
-  // ---- Mini self-play replay ------------------------------------------------
+  // ---- Mini self-play replays (Game A + Game B) ----------------------------
 
-  const MINI_STEP_MS = 220;  // ms between frames in the mini replay
+  const MINI_STEP_MS = 220;  // ms between frames in each mini replay
 
-  function startMiniPlayback() {
-    stopMiniPlayback();
-    const game = state.latestSampleGame;
+  const MINI_SLOTS = {
+    A: {
+      ctx: miniCtxA,
+      captionEl: () => document.getElementById("mini-caption-a"),
+      getLatest: () => state.latestSampleGameA,
+      getPlayback: () => state.miniPlaybackA,
+      setPlayback: (pb) => { state.miniPlaybackA = pb; },
+    },
+    B: {
+      ctx: miniCtxB,
+      captionEl: () => document.getElementById("mini-caption-b"),
+      getLatest: () => state.latestSampleGameB,
+      getPlayback: () => state.miniPlaybackB,
+      setPlayback: (pb) => { state.miniPlaybackB = pb; },
+    },
+  };
+
+  function startAllMiniPlaybacks() {
+    startMiniPlayback("A");
+    startMiniPlayback("B");
+  }
+
+  function stopAllMiniPlaybacks() {
+    stopMiniPlayback("A");
+    stopMiniPlayback("B");
+  }
+
+  function startMiniPlayback(slotId) {
+    const slot = MINI_SLOTS[slotId];
+    stopMiniPlayback(slotId);
+    const game = slot.getLatest();
     if (!game || !game.frames || game.frames.length === 0) {
-      setMiniCaption("waiting for self-play game…");
+      slot.captionEl().textContent = "waiting for self-play game…";
       return;
     }
-    state.miniPlayback = { game, step: 0, finished: false, timer: null };
-    tickMiniPlayback();
+    const pb = { game, step: 0, finished: false, timer: null };
+    slot.setPlayback(pb);
+    tickMiniPlayback(slotId);
   }
 
-  function stopMiniPlayback() {
-    if (state.miniPlayback && state.miniPlayback.timer != null) {
-      clearTimeout(state.miniPlayback.timer);
-    }
-    state.miniPlayback = null;
+  function stopMiniPlayback(slotId) {
+    const slot = MINI_SLOTS[slotId];
+    const pb = slot.getPlayback();
+    if (pb && pb.timer != null) clearTimeout(pb.timer);
+    slot.setPlayback(null);
   }
 
-  function tickMiniPlayback() {
-    const pb = state.miniPlayback;
+  function tickMiniPlayback(slotId) {
+    const slot = MINI_SLOTS[slotId];
+    const pb = slot.getPlayback();
     if (!pb) return;
     const frames = pb.game.frames;
     const squares = frames[pb.step];
-    Render.drawMini(miniCtx, squares, { size: miniSize });
+    Render.drawMini(slot.ctx, squares, { size: miniSize });
     if (pb.step >= frames.length - 1) {
-      drawWinnerOverlay(miniCtx, miniSize, pb.game.winner);
+      drawWinnerOverlay(slot.ctx, miniSize, pb.game.winner);
     }
-    setMiniCaption(miniCaptionFor(pb.game, pb.step));
+    slot.captionEl().textContent = miniCaptionFor(pb.game, pb.step);
 
     pb.step += 1;
     if (pb.step >= frames.length) {
       pb.finished = true;
-      // Pause a moment on the final frame, then restart if we still have one.
       pb.timer = setTimeout(() => {
-        // If a newer game arrived, start it; else loop this one.
-        if (state.latestSampleGame && state.latestSampleGame !== pb.game) {
-          startMiniPlayback();
+        const latest = slot.getLatest();
+        if (latest && latest !== pb.game) {
+          startMiniPlayback(slotId);
         } else {
           pb.step = 0;
           pb.finished = false;
-          tickMiniPlayback();
+          tickMiniPlayback(slotId);
         }
       }, 1400);
       return;
     }
-    pb.timer = setTimeout(tickMiniPlayback, MINI_STEP_MS);
+    pb.timer = setTimeout(() => tickMiniPlayback(slotId), MINI_STEP_MS);
   }
 
   function miniCaptionFor(game, step) {
@@ -775,11 +809,7 @@
       const outcome = w === 1 ? "Black wins" : w === -1 ? "White wins" : "Draw";
       return `#${game.blackIdx} vs #${game.whiteIdx} → ${outcome} (${frames.length - 1} plies)`;
     }
-    return `#${game.blackIdx} vs #${game.whiteIdx}  · move ${moveNum}/${frames.length - 1}`;
-  }
-
-  function setMiniCaption(text) {
-    document.getElementById("mini-caption").textContent = text;
+    return `#${game.blackIdx} vs #${game.whiteIdx} · move ${moveNum}/${frames.length - 1}`;
   }
 
   function drawWinnerOverlay(ctx, size, winner) {
@@ -931,11 +961,13 @@
   resignBtn.addEventListener("click", onResign);
   humanColorSel.addEventListener("change", resetGame);
 
-  // Draw the starting board on the mini canvas immediately so the panel is
-  // populated before the first self-play game arrives. Gives the user a
-  // visible target to look at and confirms the renderer is alive.
-  Render.drawMini(miniCtx, C.makeBoard().squares, { size: miniSize });
-  setMiniCaption("starting position — self-play will replay here during your turn");
+  // Draw the starting board on each mini canvas immediately so the panel is
+  // populated before the first self-play game arrives.
+  const startingSquares = C.makeBoard().squares;
+  Render.drawMini(miniCtxA, startingSquares, { size: miniSize });
+  Render.drawMini(miniCtxB, startingSquares, { size: miniSize });
+  document.getElementById("mini-caption-a").textContent = "starting position — self-play replays here during your turn";
+  document.getElementById("mini-caption-b").textContent = "starting position — self-play replays here during your turn";
 
   resetGame();
 })();
