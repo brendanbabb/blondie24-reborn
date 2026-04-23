@@ -212,12 +212,15 @@
               <rect width="72" height="72" fill="url(#g-checker)"/>
               <rect width="72" height="72" fill="none" stroke="#2a1a10" stroke-width="0.8"/>
 
-              <!-- Two example sub-board windows showing what a "filter"
-                   covers: a small 3x3 (cyan) up top, and a larger 5x5
-                   (yellow) lower-left. The real network has 91 of these
-                   in sizes 3x3 through 8x8. -->
+              <!-- Three example sub-board windows showing what a "filter"
+                   covers: a small 3x3 (cyan) top-right, a 4x4 (magenta)
+                   in the middle (intentionally overlapping the others to
+                   show that windows are NOT tiled — they freely cover any
+                   contiguous region), and a 5x5 (yellow) lower-left. The
+                   real network has 91 of these in sizes 3x3 through 8x8. -->
               <g fill="none" stroke-dasharray="3,2">
                 <rect x="45" y="0"  width="27" height="27" stroke="#5acdff" stroke-width="1.5"/>
+                <rect x="27" y="18" width="36" height="36" stroke="#ff6ad8" stroke-width="1.5"/>
                 <rect x="0"  y="27" width="45" height="45" stroke="#f3c14a" stroke-width="1.5"/>
               </g>
               <!-- Pill-backed labels so the size text reads against the
@@ -227,8 +230,12 @@
                 <text x="58" y="16.5" fill="#5acdff" font-size="7" font-weight="700" text-anchor="middle">3×3</text>
               </g>
               <g>
-                <rect x="15"  y="48"  width="15" height="9" fill="#0f1115" rx="2" opacity="0.92"/>
-                <text x="22.5" y="55" fill="#f3c14a" font-size="7" font-weight="700" text-anchor="middle">5×5</text>
+                <rect x="37.5" y="40" width="15" height="9" fill="#0f1115" rx="2" opacity="0.92"/>
+                <text x="45" y="47" fill="#ff6ad8" font-size="7" font-weight="700" text-anchor="middle">4×4</text>
+              </g>
+              <g>
+                <rect x="3"  y="62"  width="15" height="9" fill="#0f1115" rx="2" opacity="0.92"/>
+                <text x="10.5" y="69" fill="#f3c14a" font-size="7" font-weight="700" text-anchor="middle">5×5</text>
               </g>
             </g>
 
@@ -373,10 +380,10 @@
 
 </main>
 
-<script src="js/checkers.js?v=13"></script>
-<script src="js/render.js?v=13"></script>
-<script src="js/anaconda-network.js?v=13"></script>
-<script src="js/minimax.js?v=13"></script>
-<script src="js/play-strong.js?v=13"></script>
+<script src="js/checkers.js?v=14"></script>
+<script src="js/render.js?v=14"></script>
+<script src="js/anaconda-network.js?v=14"></script>
+<script src="js/minimax.js?v=14"></script>
+<script src="js/play-strong.js?v=14"></script>
 </body>
 </html>
