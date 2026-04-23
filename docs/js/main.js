@@ -416,7 +416,7 @@
 
   // ---- Game state + rendering ----------------------------------------------
 
-  function resetGame() {
+  function resetGame(autoStart) {
     state.board = C.makeBoard();
     state.selectedFrom = -1;
     state.pendingJumpPath = null;
@@ -426,8 +426,11 @@
     state.stateCounts = Object.create(null);
     state.finished = false;
     state.humanColor = humanColorSel.value;
-    state.aiThinking = true;   // block human input while warmup runs
-    state.preTraining = true;
+    // When autoStart=false we're idling — wait for the user to click "New
+    // game" so they've had a chance to pick their color.
+    state.aiThinking = !!autoStart;
+    state.preTraining = !!autoStart;
+    state.gameActive  = !!autoStart;   // false while idling before New game
     state.preTrainingStartGen = 0;
     state.latestGen = 0;
     state.turnStartGen = 0;
@@ -464,13 +467,19 @@
     updateAiTimeDisplay();
 
     logClear();
-    log(`AI warming up — running ${PRETRAIN_GENS} generations before the first move…`);
+    if (autoStart) {
+      log(`AI warming up — running ${PRETRAIN_GENS} generations before the first move…`);
+    } else {
+      log("Choose your color, then click New game to begin.");
+    }
     render();
     updatePieceCounts();
     updateButtons();
-    // Kick off the warmup: resume the worker, watch for gen >= PRETRAIN_GENS
-    // in the gen-event handler, then pause and start the actual game.
-    worker.postMessage({ type: "resume" });
+    if (autoStart) {
+      // Kick off the warmup: resume the worker, watch for gen >= PRETRAIN_GENS
+      // in the gen-event handler, then pause and start the actual game.
+      worker.postMessage({ type: "resume" });
+    }
   }
 
   function log(msg) { moveLog.textContent = msg; }
@@ -566,7 +575,7 @@
   }
 
   function onCanvasClick(ev) {
-    if (state.finished || state.aiThinking) return;
+    if (!state.gameActive || state.finished || state.aiThinking) return;
     if (state.board.currentPlayer !== humanSide()) return;
 
     const sq = R.clickToSquare(canvas, ev, state.humanColor);
@@ -863,12 +872,15 @@
   function miniCaptionFor(game, step) {
     const frames = game.frames;
     const moveNum = step;
+    const br = game.blackRank ? " (rank " + game.blackRank + ")" : "";
+    const wr = game.whiteRank ? " (rank " + game.whiteRank + ")" : "";
+    const label = `#${game.blackIdx}${br} vs #${game.whiteIdx}${wr}`;
     if (step >= frames.length - 1) {
       const w = game.winner;
       const outcome = w === 1 ? "Black wins" : w === -1 ? "White wins" : "Draw";
-      return `#${game.blackIdx} vs #${game.whiteIdx} → ${outcome} (${frames.length - 1} plies)`;
+      return `${label} → ${outcome} (${frames.length - 1} plies)`;
     }
-    return `#${game.blackIdx} vs #${game.whiteIdx} · move ${moveNum}/${frames.length - 1}`;
+    return `${label} · move ${moveNum}/${frames.length - 1}`;
   }
 
   function drawWinnerOverlay(ctx, size, winner) {
@@ -1008,17 +1020,19 @@
   }
 
   function updateButtons() {
-    const yourTurn = !state.finished && !state.aiThinking
+    const yourTurn = state.gameActive && !state.finished && !state.aiThinking
                      && state.board.currentPlayer === humanSide();
     offerDrawBtn.disabled = !yourTurn || !state.aiNet;
     resignBtn.disabled = !yourTurn;
   }
 
   canvas.addEventListener("click", onCanvasClick);
-  newGameBtn.addEventListener("click", resetGame);
+  newGameBtn.addEventListener("click", () => resetGame(true));
   offerDrawBtn.addEventListener("click", onOfferDraw);
   resignBtn.addEventListener("click", onResign);
-  humanColorSel.addEventListener("change", resetGame);
+  // Changing color before hitting New game just updates the color — doesn't
+  // auto-start so the user stays in control of when training begins.
+  humanColorSel.addEventListener("change", () => resetGame(false));
 
   // Draw the starting board on the mini canvas immediately so the panel is
   // populated before the first self-play game arrives.
@@ -1026,5 +1040,8 @@
   document.getElementById("mini-label").textContent = "—";
   document.getElementById("mini-caption").textContent = "starting position — self-play replays here during your turn";
 
-  resetGame();
+  // Initial page state: idle, waiting for the user to choose a color and
+  // click New game. resetGame(false) sets everything up without starting
+  // evolution — nothing trains until the button is clicked.
+  resetGame(false);
 })();

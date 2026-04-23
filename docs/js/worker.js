@@ -148,12 +148,14 @@ function runOneGen() {
     const p = pairings[pi];
     const black = p.aIsBlack ? population[p.a] : population[p.b];
     const white = p.aIsBlack ? population[p.b] : population[p.a];
+    const blackPopIdx = p.aIsBlack ? p.a : p.b;
+    const whitePopIdx = p.aIsBlack ? p.b : p.a;
     const result = playGame(black, white, true);
     const winner = result.winner;
     allRecordings.push({
       frames: result.frames,
-      blackIdx: p.aIsBlack ? p.a : p.b,
-      whiteIdx: p.aIsBlack ? p.b : p.a,
+      blackIdx: blackPopIdx,
+      whiteIdx: whitePopIdx,
       winner: winner,
     });
 
@@ -175,21 +177,42 @@ function runOneGen() {
     }
   }
 
-  // Pick 2 games for the replay panel. Prefer decisive over draws; shuffle
-  // within the preferred tier so successive gens don't always pick the same
-  // pairings. If there aren't enough decisive games, fill from draws.
+  // Compute each network's rank from the current tournament (1 = best fitness).
+  // We need this BEFORE selection reshuffles population, and we use it to
+  // attach rank metadata to recordings and to prefer games where a high-ranked
+  // network played a low-ranked one (more instructive to watch).
+  const rankOf = new Array(POP_SIZE);
+  const scored = population.map((ind, i) => ({ idx: i, fit: ind.fitness }));
+  scored.sort((a, b) => b.fit - a.fit);
+  for (let r = 0; r < scored.length; r++) rankOf[scored[r].idx] = r + 1;
+  for (const rec of allRecordings) {
+    rec.blackRank = rankOf[rec.blackIdx];
+    rec.whiteRank = rankOf[rec.whiteIdx];
+  }
+
+  // Pick 2 games for the replay panel:
+  //   1) Prefer decisive (winner != 0) games — falls back to draws if needed.
+  //   2) Within that tier, prefer games where the two players are far apart in
+  //      rank (bigger "strong vs weak" gap). More instructive to watch than
+  //      two middle-of-the-pack networks dancing.
+  //   3) Light shuffling within the top candidates so successive gens don't
+  //      always surface the same pairing.
   const decisive = allRecordings.filter(r => r.winner !== 0);
   const draws = allRecordings.filter(r => r.winner === 0);
-  const pool = (decisive.length >= 2)
-    ? decisive
-    : decisive.concat(draws);  // fallback: use draws too when needed
-  // Fisher–Yates shuffle of the pool
-  for (let i = pool.length - 1; i > 0; i--) {
+  const pool = (decisive.length >= 2) ? decisive : decisive.concat(draws);
+  pool.sort((a, b) => {
+    const gapA = Math.abs(a.blackRank - a.whiteRank);
+    const gapB = Math.abs(b.blackRank - b.whiteRank);
+    return gapB - gapA;
+  });
+  // Take the top-4 widest-gap games and shuffle those for variety.
+  const topN = pool.slice(0, 4);
+  for (let i = topN.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+    const tmp = topN[i]; topN[i] = topN[j]; topN[j] = tmp;
   }
-  _lastSampleGameA = pool[0] || null;
-  _lastSampleGameB = pool[1] || null;
+  _lastSampleGameA = topN[0] || null;
+  _lastSampleGameB = topN[1] || null;
 
   // Capture the tournament standings BEFORE selection zeroes fitness.
   population.sort((x, y) => y.fitness - x.fitness);
