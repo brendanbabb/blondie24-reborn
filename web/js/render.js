@@ -140,9 +140,13 @@
   // Tiny board used for the self-play replay panel. No highlights, no hints,
   // just squares + pieces, scaled to the given canvas size. Accepts a raw
   // Int8Array(32) of squares so it can render historical snapshots.
+  //
+  // opts.highlightSq: 0..31 to draw a vivid ring around that square (used by
+  //   the AI's-plan strip to mark the piece that just moved); -1/undefined skips it.
   function drawMini(ctx, squares, opts) {
     opts = opts || {};
     const canvasSize = opts.size != null ? opts.size : 200;
+    const highlightSq = opts.highlightSq != null ? opts.highlightSq : -1;
     const cell = canvasSize / 8;
     const pr = cell * 0.38;
 
@@ -158,6 +162,15 @@
         if (!isDark) continue;
         const sq = C.sqOf(r, c);
         if (sq === -1) continue;
+
+        // Square-level highlight (drawn behind the piece) for the moved-to
+        // square — gives a glow under the piece even when the piece itself
+        // is small.
+        if (sq === highlightSq) {
+          ctx.fillStyle = COLOR.hlTo;
+          ctx.fillRect(x, y, cell, cell);
+        }
+
         const piece = squares[sq];
         if (piece === C.EMPTY) continue;
         const cx = x + cell / 2;
@@ -176,6 +189,15 @@
           ctx.arc(cx, cy, pr * 0.55, 0, Math.PI * 2);
           ctx.strokeStyle = COLOR.kingCrown;
           ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+        // Bright ring around the just-moved piece, drawn last so it sits
+        // on top of the piece outline.
+        if (sq === highlightSq) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, pr + 2, 0, Math.PI * 2);
+          ctx.strokeStyle = COLOR.kingCrown;  // bright accent yellow
+          ctx.lineWidth = 2.5;
           ctx.stroke();
         }
       }

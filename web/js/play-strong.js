@@ -440,7 +440,10 @@
       // Side that's ABOUT to move at this snapshot (the one playing this ply).
       const mover = board.currentPlayer;
       const aiSide = -humanSide();
-      const actorLabel = (mover === aiSide) ? "AI" : "You";
+      const isAi = (mover === aiSide);
+      // Grammar: "You play" (2nd person) vs "AI plays" (3rd person).
+      const actorLabel = isAi ? "AI plays" : "You play";
+      const movedTo = move[move.length - 1];
 
       board = C.applyMove(board, move);
       const evalRaw = state.aiNet ? state.aiNet.forward(board) : 0;
@@ -461,12 +464,17 @@
       cv.width = PLAN_BOARD_PX;
       cv.height = PLAN_BOARD_PX;
       const cvCtx = cv.getContext("2d");
-      R.drawMini(cvCtx, board.squares, { size: PLAN_BOARD_PX });
+      // highlightSq draws a yellow ring around the piece that just moved
+      // — makes the move visible at the small mini-board scale.
+      R.drawMini(cvCtx, board.squares, {
+        size: PLAN_BOARD_PX,
+        highlightSq: movedTo,
+      });
       cell.appendChild(cv);
 
       const actor = document.createElement("div");
       actor.className = "ply-actor";
-      actor.textContent = actorLabel + " plays";
+      actor.textContent = actorLabel;
       cell.appendChild(actor);
 
       const score = document.createElement("div");
