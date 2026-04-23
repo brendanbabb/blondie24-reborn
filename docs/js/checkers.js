@@ -215,33 +215,69 @@
   }
 
   // Apply a move to a cloned board and return the new board (pure function).
+  // Used by callers that want an independent successor (game loop, UI). The
+  // search hot path uses applyMoveInPlace + undoMove instead to avoid the
+  // per-node Int8Array(32) clone — that's the bulk of GC pressure at depth 4.
   function applyMove(board, move) {
     const next = cloneBoard(board);
-    const sq = next.squares;
+    applyMoveInPlace(next, move);
+    return next;
+  }
+
+  // Mutate `board` in place to apply `move`; return an undo record that
+  // undoMove() consumes to restore the prior state exactly. Move format is
+  // identical to applyMove. Allocates only the small undo object (and a flat
+  // pairs array for jumps) — no Int8Array clone.
+  function applyMoveInPlace(board, move) {
+    const sq = board.squares;
     const from = move[0];
-    const piece = sq[from];
+    const fromPiece = sq[from];
     sq[from] = EMPTY;
 
+    let currentPiece = fromPiece;
+    let last;
+    let caps = null;
+
     if (move.length === 2) {
-      const to = move[1];
-      sq[to] = maybePromote(piece, to);
+      last = move[1];
+      currentPiece = maybePromote(currentPiece, last);
     } else {
-      // jump sequence
-      let last = from;
-      let currentPiece = piece;
+      caps = [];
       for (let i = 1; i < move.length; i += 2) {
         const cap = move[i];
         const land = move[i + 1];
+        caps.push(cap, sq[cap]);
         sq[cap] = EMPTY;
         currentPiece = maybePromote(currentPiece, land);
         last = land;
       }
-      sq[last] = currentPiece;
     }
 
-    next.currentPlayer = -next.currentPlayer;
-    next.moveCount = board.moveCount + 1;
-    return next;
+    sq[last] = currentPiece;
+
+    const prevPlayer = board.currentPlayer;
+    const prevMoveCount = board.moveCount;
+    board.currentPlayer = -prevPlayer;
+    board.moveCount = prevMoveCount + 1;
+
+    return { from, fromPiece, last, caps, prevPlayer, prevMoveCount };
+  }
+
+  // Reverse applyMoveInPlace using the returned undo record. Order matters
+  // when the jumper returns to its starting square (rare but legal): clear
+  // `last` first, then restore `from` last, so the original piece wins.
+  function undoMove(board, undo) {
+    const sq = board.squares;
+    sq[undo.last] = EMPTY;
+    if (undo.caps !== null) {
+      const caps = undo.caps;
+      for (let i = 0; i < caps.length; i += 2) {
+        sq[caps[i]] = caps[i + 1];
+      }
+    }
+    sq[undo.from] = undo.fromPiece;
+    board.currentPlayer = undo.prevPlayer;
+    board.moveCount = undo.prevMoveCount;
   }
 
   function maybePromote(piece, land) {
@@ -285,6 +321,7 @@
     rowColOf, sqOf,
     makeBoard, cloneBoard,
     getLegalMoves, applyMove,
+    applyMoveInPlace, undoMove,
     owner, isKing, pieceCount,
     isGameOver, stateKey,
   };
