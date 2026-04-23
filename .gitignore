@@ -41,3 +41,11 @@ Thumbs.db
 # Numba cache
 __pycache__/
 .numba_cache/
+
+# Claude Code per-machine state
+.claude/
+
+# Stray directory from a shell brace-expansion typo early in the project —
+# name is literally "{checkers,neural,search,evolution,training,play,analysis}".
+# Don't track it; the real directories live at the top level already.
+{checkers,neural,search,evolution,training,play,analysis}/

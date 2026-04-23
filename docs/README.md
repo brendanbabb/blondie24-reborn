@@ -64,15 +64,13 @@ main thread's snapshot promise has an 8-second timeout to absorb that.
 In `docs/js/worker.js`:
 
 ```js
-POP_SIZE               = 6     // networks per generation
-GAMES_PER_INDIVIDUAL   = 3     // self-play games per network per gen
-TRAIN_DEPTH_OPENING    = 3     // minimax depth while pieces > ENDGAME_PIECE_THRESHOLD
-TRAIN_DEPTH_ENDGAME    = 5     // minimax depth when total pieces <= threshold
-ENDGAME_PIECE_THRESHOLD= 6     // pieces-on-board cutoff for adaptive depth
-MAX_GAME_MOVES         = 80    // self-play draw cap
-WIN_SCORE  =  1.0              // paper fitness
+POP_SIZE             = 6     // networks per generation
+GAMES_PER_INDIVIDUAL = 3     // self-play games per network per gen
+TRAIN_SEARCH_DEPTH   = 4     // paper-faithful flat depth for self-play
+MAX_GAME_MOVES       = 80    // self-play draw cap
+WIN_SCORE  =  1.0            // paper fitness
 DRAW_SCORE =  0.0
-LOSS_SCORE = -2.0              // paper's asymmetric loss penalty
+LOSS_SCORE = -2.0            // paper's asymmetric loss penalty
 ```
 
 In `docs/js/main.js`:
@@ -81,10 +79,26 @@ In `docs/js/main.js`:
 AI_DEPTH            = 4     // depth for the move the AI plays against you
 TRAIN_BURST_MS      = 2000  // how long the worker evolves between AI moves
 MIN_SEARCH_PAD_MS   = 200   // UX pad so the AI doesn't snap-move instantly
-PRETRAIN_GENS       = 1     // warmup gens run when you click New game
+PRETRAIN_GENS       = 2     // warmup gens run when you click New game
 MINI_STEP_MS        = 220   // ms per frame in the self-play replay animation
 MINI_END_HOLD_MS    = 1800  // pause on the winner banner before alternating
 ```
+
+### Paper-faithfulness notes
+
+The demo deliberately stays close to Chellapilla & Fogel 1999:
+
+- **Flat self-play depth** (4 ply) matching the paper — no "search deeper in the endgame"
+  injection, even though that heuristic would reduce shuffle-draws.
+- **Piece-difference bypass weight** is initialized from N(0, σ), same as every other weight
+  — not seeded to a useful positive value. Gen-0 networks play chaotically; selection finds
+  the useful bypass value over 10–50 generations.
+- **Asymmetric scoring** (+1 / 0 / −2), **random pairing**, **no crossover**, **Schwefel
+  self-adaptive σ mutation** all match the paper.
+- **Differences from the paper** for browser-practicality: population of 6 (paper: 15),
+  3 games per individual (paper: 5), and a 2-second per-turn evolution budget instead of
+  the paper's overnight-per-generation runs. None of these change the algorithm, only its
+  scale.
 
 ## What's intentionally not there
 

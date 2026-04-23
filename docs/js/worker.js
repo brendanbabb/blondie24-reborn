@@ -31,13 +31,11 @@ const M = self.Minimax;
 // Demo-tuned EP hyperparameters — smaller than paper for browser responsiveness.
 const POP_SIZE = 6;
 const GAMES_PER_INDIVIDUAL = 3;   // paper uses 5; 3 gives reasonable ranking at pop=6
-// Adaptive training depth. Openings have wide branching and shallow search is
-// enough to rank networks; endgames have narrow branching but require more
-// plies to actually convert material into wins — at a flat depth 3 most
-// winning endgames degenerate into shuffle draws via threefold repetition.
-const TRAIN_DEPTH_OPENING  = 3;
-const TRAIN_DEPTH_ENDGAME  = 5;      // above this the Int8Array churn from deep cloning can hang the worker
-const ENDGAME_PIECE_THRESHOLD = 6;   // <= this many total pieces → use endgame depth
+// Paper-faithful: flat depth 4 in self-play, matching the paper's training
+// and game-play depth. No hand-crafted "search deeper in endgames" heuristic —
+// that would be a knowledge injection Fogel didn't make. Trade-off: more
+// shuffle-draws in tight endgames, fewer gens/sec than depth 3 would give.
+const TRAIN_SEARCH_DEPTH = 4;
 const MAX_GAME_MOVES = 80;        // move cap for self-play games (shorter than the user-facing game cap to keep training decisive)
 
 const WIN_SCORE = 1.0;
@@ -104,11 +102,7 @@ function playGame(black, white, record) {
     if (stateCounts[key] >= 3) return { winner: 0, frames };
 
     const net = board.currentPlayer === C.BLACK ? blackNet : whiteNet;
-    const [bc, wc] = C.pieceCount(board);
-    const depth = (bc + wc) <= ENDGAME_PIECE_THRESHOLD
-      ? TRAIN_DEPTH_ENDGAME
-      : TRAIN_DEPTH_OPENING;
-    const { move } = M.pickMove(board, depth, net);
+    const { move } = M.pickMove(board, TRAIN_SEARCH_DEPTH, net);
     if (!move) return { winner: -board.currentPlayer, frames };
     board = C.applyMove(board, move);
     if (frames) frames.push(new Int8Array(board.squares));

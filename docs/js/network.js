@@ -35,19 +35,20 @@
   const OFF_KING = OFF_PIECE_DIFF + 1;
 
   function newRandomWeights(sigma) {
-    // Near-zero weights with a small positive piece-difference bypass so even
-    // an "untrained" network plays something resembling checkers (captures
-    // when it can) instead of pure noise. Matches the kind of bootstrap the
-    // paper did: initial networks are random, but material-counting emerges
-    // quickly because the bypass weight is itself evolved.
+    // Paper-faithful initialization:
+    //   - All evolvable weights, including the piece-difference bypass, are
+    //     drawn from N(0, sigma). The paper did NOT seed the bypass with a
+    //     useful value — it emerges through selection like everything else.
+    //   - King weight is the one exception: paper explicitly initialized K
+    //     at 2.0 (constrained to [1, 3] — we don't clamp, but it rarely
+    //     drifts at sigma=0.05).
+    // This means gen-0 networks play erratically (may give back material
+    // freely) — a feature, not a bug, for the "watch it learn" demo.
     sigma = sigma == null ? 0.05 : sigma;
     const w = new Float32Array(N_WEIGHTS);
     for (let i = 0; i < N_WEIGHTS; i++) {
       w[i] = gauss() * sigma;
     }
-    // Modest positive piece-diff bias so the AI at least fights for material.
-    w[OFF_PIECE_DIFF] = 0.3;
-    // King weight starts at ~2.0 (paper).
     w[OFF_KING] = 2.0;
     return w;
   }

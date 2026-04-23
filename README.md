@@ -60,20 +60,26 @@ Every AI turn, for ~2 seconds:
 
 1. Population of **6 networks** runs a self-play tournament — each plays **3 games** against
    random opponents from the group.
-2. Training search: **3 plies** (opening/midgame), **5 plies** once ≤6 pieces remain on the
-   board — deeper endgame search prevents shuffle-draws when one side is materially ahead.
+2. Training search: **flat depth 4** — same as game-play, same as the paper. No hand-crafted
+   "search deeper in the endgame" boost; Fogel didn't use one either.
 3. Scoring is paper-faithful: **+1 win / 0 draw / −2 loss**.
 4. Top 3 networks survive; bottom 3 are replaced by **Gaussian self-adaptive EP mutations**
    of the survivors (Schwefel rule for σ, no crossover — pure evolutionary programming).
 
-At 2 seconds per AI turn, the browser typically fits **4–10 generations** per turn. Across
-~30 AI moves in a game, the population runs through **100–200 generations** total. The paper
-reached Class-A play at ~250 generations, so one casual play session touches the interesting
-part of the learning curve.
+Network weights — including the piece-difference bypass — are initialized from **N(0, σ)**
+with σ=0.05, exactly as in the paper. No hand-seeded "material bias" to bootstrap early play:
+gen-0 networks play chaotically and selection finds the useful weights on its own. After
+clicking New game the worker runs **2 warmup generations** before the first move so the AI
+at least isn't literally random on move 1.
+
+At 2 seconds per AI turn at depth 4, the browser typically fits **2–6 generations** per turn.
+Across ~30 AI moves in a game, the population runs through **60–150 generations** total. The
+paper reached Class-A play at ~250 generations, so one casual play session covers the first
+half of the learning curve.
 
 When the AI's 2 seconds are up, the current top-ranked network runs **depth-4 minimax** from
-the board you see (paper-faithful) and plays its move. Evolution pauses while you think, so
-the opponent you face at any point is frozen — it only changes between AI turns.
+the board you see and plays its move. Evolution pauses while you think, so the opponent you
+face at any point is frozen — it only changes between AI turns.
 
 > **A note on the name.** "Blondie24" is the screen name used on Zone.com by the 2001 "Anaconda"
 > system (Chellapilla & Fogel 2001), which added a spatial-preprocessing layer on top of the 1999

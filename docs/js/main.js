@@ -37,7 +37,7 @@
   const AI_DEPTH = 4;
   const TRAIN_BURST_MS = 2000;   // evolution runs this long per AI turn
   const MIN_SEARCH_PAD_MS = 200; // small UX pad so moves don't snap instantly
-  const PRETRAIN_GENS = 1;       // gens to run between New Game and first move
+  const PRETRAIN_GENS = 2;       // gens to run between New Game and first move
 
   const state = {
     board: C.makeBoard(),
