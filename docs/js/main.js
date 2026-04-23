@@ -37,6 +37,7 @@
   const AI_DEPTH = 4;
   const TRAIN_BURST_MS = 3000;   // evolution runs this long per AI turn
   const MIN_SEARCH_PAD_MS = 200; // small UX pad so moves don't snap instantly
+  const PRETRAIN_GENS = 3;       // gens to run between New Game and first move
 
   const state = {
     board: C.makeBoard(),
@@ -57,6 +58,8 @@
     aiEvolveMs: 0,     // cumulative training-burst time across all AI turns
     aiSearchMs: 0,     // cumulative minimax-search time across all AI turns
     aiMoveCount: 0,    // AI moves committed this game
+    preTraining: false, // true while we spin up initial warmup gens before move 1
+    preTrainingStartGen: 0,
     latestSampleGameA: null,
     latestSampleGameB: null,
     miniSlot: "A",         // which sample game is currently playing back: "A" or "B"
@@ -83,7 +86,19 @@
     }
     if (msg.type === "gen") {
       state.latestGen = msg.gen;
-      if (state.aiThinking) {
+      // Warmup: evolve PRETRAIN_GENS generations before the first human/AI move.
+      if (state.preTraining && msg.gen >= state.preTrainingStartGen + PRETRAIN_GENS) {
+        state.preTraining = false;
+        state.aiThinking = false;
+        worker.postMessage({ type: "pause" });
+        log(`Warmup done at gen ${msg.gen}. Game starts now.`);
+        updateButtons();
+        maybeStartAiTurn();
+        // Fall through so the gen stats still get recorded below.
+      }
+      // Don't count warmup gens as part of an AI-turn burst — turn stats
+      // only track the per-turn 3s windows that happen during real play.
+      if (state.aiThinking && !state.preTraining) {
         state.turnGens.push({
           gen: msg.gen,
           meanFitness: msg.meanFitness,
@@ -400,7 +415,9 @@
     state.stateCounts = Object.create(null);
     state.finished = false;
     state.humanColor = humanColorSel.value;
-    state.aiThinking = false;
+    state.aiThinking = true;   // block human input while warmup runs
+    state.preTraining = true;
+    state.preTrainingStartGen = 0;
     state.latestGen = 0;
     state.turnStartGen = 0;
     state.turnGens = [];
@@ -436,10 +453,13 @@
     updateAiTimeDisplay();
 
     logClear();
+    log(`AI warming up — running ${PRETRAIN_GENS} generations before the first move…`);
     render();
     updatePieceCounts();
     updateButtons();
-    maybeStartAiTurn();
+    // Kick off the warmup: resume the worker, watch for gen >= PRETRAIN_GENS
+    // in the gen-event handler, then pause and start the actual game.
+    worker.postMessage({ type: "resume" });
   }
 
   function log(msg) { moveLog.textContent = msg; }
