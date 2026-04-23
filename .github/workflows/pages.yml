@@ -8,6 +8,12 @@ on:
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
+env:
+  # Opt into Node.js 24 for JS-based actions before it becomes the default
+  # (June 2, 2026). Silences the "Node 20 is deprecated" warning and
+  # future-proofs the workflow against the September 16, 2026 removal.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   contents: read
   pages: write
