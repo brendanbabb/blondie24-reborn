@@ -1,0 +1,500 @@
+/*
+ * play-strong.js
+ *
+ * The "play the fully evolved champion" page. Loads a frozen Anaconda
+ * network from docs/weights/anaconda.bin on startup and plays the human
+ * via minimax — no training, no worker, no evolution panels.
+ *
+ * Deliberately shares as little as possible with the live-evolve demo's
+ * main.js so the two pages can evolve independently. Reuses only the
+ * shared modules: checkers.js, render.js, anaconda-network.js, minimax.js.
+ */
+
+(function () {
+  "use strict";
+
+  const C = self.Checkers;
+  const R = self.Render;
+  const A = self.AnacondaNetwork;
+  const M = self.Minimax;
+
+  const AI_DEPTH = 6;
+  const MIN_SEARCH_PAD_MS = 200;       // UX pad so fast endgames don't snap-move
+  const THINKING_YIELD_MS = 20;        // paint the "AI is thinking…" banner before blocking
+
+  const WEIGHTS_URL = "weights/anaconda.bin?v=6";
+  const META_URL    = "weights/anaconda.meta.json?v=6";
+
+  // ---- DOM refs ----
+  const canvas        = document.getElementById("board");
+  const ctx           = canvas.getContext("2d");
+  const moveLogEl     = document.getElementById("move-log");
+  const moveHistoryEl = document.getElementById("move-history");
+  const bannerEl      = document.getElementById("status-banner");
+  const newGameBtn    = document.getElementById("new-game");
+  const offerDrawBtn  = document.getElementById("offer-draw");
+  const askResignBtn  = document.getElementById("ask-resign");
+  const resignBtn     = document.getElementById("resign");
+  const humanColorSel = document.getElementById("human-color");
+
+  // ---- State ----
+  const state = {
+    board: C.makeBoard(),
+    selectedFrom: -1,
+    pendingJumpPath: null,
+    lastFrom: -1,
+    lastTo: -1,
+    lastCaptured: [],
+    stateCounts: Object.create(null),
+    finished: false,
+    humanColor: "white",
+    aiNet: null,                 // filled once anaconda.bin loads
+    netReady: false,
+    aiThinking: false,
+    aiMoveCount: 0,
+    aiThinkMs: 0,                // cumulative search time
+    gameActive: false,
+  };
+
+  // ---- Logging helpers ----
+  function log(msg) {
+    moveLogEl.textContent = msg;
+  }
+  function showBanner(kind, text) {
+    if (!text) { bannerEl.hidden = true; bannerEl.className = ""; bannerEl.textContent = ""; return; }
+    bannerEl.hidden = false;
+    bannerEl.className = kind || "";
+    bannerEl.textContent = text;
+  }
+  function humanSide() {
+    return state.humanColor === "black" ? C.BLACK : C.WHITE;
+  }
+
+  // ---- Load weights + metadata ----
+  async function loadOpponent() {
+    document.getElementById("weights-label").textContent = "loading…";
+    document.getElementById("training-label").textContent = "loading…";
+    try {
+      const [weights, metaResp] = await Promise.all([
+        A.loadWeightsFromUrl(WEIGHTS_URL),
+        fetch(META_URL).then(r => r.ok ? r.json() : null).catch(() => null),
+      ]);
+      state.aiNet = A.makeNetwork(weights);
+      state.netReady = true;
+      document.getElementById("weights-label").textContent = String(weights.length);
+      if (metaResp) {
+        const gens = metaResp.generations;
+        const src = metaResp.source || "unknown";
+        document.getElementById("training-label").textContent =
+          (gens != null ? `${gens} gens — ` : "") + src;
+        if ((gens == null || gens === 0) && /random/i.test(src)) {
+          showBanner("",
+            "Playing against UNTRAINED (random-init) weights — this is a " +
+            "pipeline stub, not the real Anaconda opponent. See README for " +
+            "the training command."
+          );
+        }
+      } else {
+        document.getElementById("training-label").textContent = "(no metadata)";
+      }
+      render();
+    } catch (err) {
+      console.error(err);
+      showBanner("", "Failed to load opponent weights: " + (err.message || err));
+      document.getElementById("weights-label").textContent = "error";
+    }
+  }
+
+  // ---- Board hints + forced-capture banner ----
+  function pathStartsWith(move, prefix) {
+    if (move.length < prefix.length) return false;
+    for (let i = 0; i < prefix.length; i++) if (move[i] !== prefix[i]) return false;
+    return true;
+  }
+  function arrayEq(a, b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  function computeHints() {
+    const out = { legalTargets: [], captureTargets: [] };
+    if (state.finished || !state.gameActive) return out;
+    if (state.board.currentPlayer !== humanSide()) return out;
+
+    const moves = C.getLegalMoves(state.board);
+    if (state.pendingJumpPath) {
+      for (const m of moves) {
+        if (m.length < 3) continue;
+        if (!pathStartsWith(m, state.pendingJumpPath)) continue;
+        const nextLand = m[state.pendingJumpPath.length + 1];
+        if (nextLand != null && out.legalTargets.indexOf(nextLand) === -1) {
+          out.legalTargets.push(nextLand);
+          out.captureTargets.push(nextLand);
+        }
+      }
+      return out;
+    }
+    if (state.selectedFrom !== -1) {
+      for (const m of moves) {
+        if (m[0] !== state.selectedFrom) continue;
+        if (m.length === 2) {
+          out.legalTargets.push(m[1]);
+        } else {
+          out.legalTargets.push(m[2]);
+          out.captureTargets.push(m[2]);
+        }
+      }
+    }
+    return out;
+  }
+
+  function updateForcedCaptureBanner() {
+    if (state.finished || state.aiThinking || !state.gameActive) { showBanner(null, null); return; }
+    if (state.board.currentPlayer !== humanSide()) { showBanner(null, null); return; }
+    const moves = C.getLegalMoves(state.board);
+    if (moves.length === 0) { showBanner(null, null); return; }
+    const forced = moves[0].length >= 3;
+    if (!forced) { showBanner(null, null); return; }
+    if (state.pendingJumpPath) {
+      showBanner("", "You must continue the jump — click the next green dot.");
+      return;
+    }
+    const pieces = new Set();
+    for (const m of moves) pieces.add(m[0]);
+    const count = pieces.size;
+    const list = Array.from(pieces).sort((a, b) => a - b).map(sq => sq + 1).join(", ");
+    showBanner("", `Capture is mandatory. ${count} of your pieces can jump (square${count > 1 ? "s" : ""}: ${list}).`);
+  }
+
+  function render() {
+    const hints = computeHints();
+    R.draw(ctx, state.board, {
+      lastFrom: state.lastFrom,
+      lastTo: state.lastTo,
+      captured: state.lastCaptured,
+      legalTargets: hints.legalTargets,
+      captureTargets: hints.captureTargets,
+      selectedFrom: state.pendingJumpPath
+        ? state.pendingJumpPath[state.pendingJumpPath.length - 1]
+        : state.selectedFrom,
+      humanColor: state.humanColor,
+    });
+    updateForcedCaptureBanner();
+  }
+
+  // ---- Click-to-move ----
+  function onCanvasClick(ev) {
+    if (!state.gameActive || state.finished || state.aiThinking) return;
+    if (state.board.currentPlayer !== humanSide()) return;
+
+    const sq = R.clickToSquare(canvas, ev, state.humanColor);
+    if (sq === -1) return;
+
+    const moves = C.getLegalMoves(state.board);
+    if (moves.length === 0) return;
+
+    if (state.pendingJumpPath) { tryExtendJump(sq, moves); return; }
+
+    if (state.selectedFrom === -1) {
+      if (moves.some(m => m[0] === sq)) {
+        state.selectedFrom = sq;
+        render();
+      }
+      return;
+    }
+
+    if (sq === state.selectedFrom) {
+      state.selectedFrom = -1;
+      render();
+      return;
+    }
+    const candidates = moves.filter(m => m[0] === state.selectedFrom);
+    const slides = candidates.filter(m => m.length === 2 && m[1] === sq);
+    const jumps  = candidates.filter(m => m.length >= 3 && m[2] === sq);
+
+    if (slides.length > 0) { commitMove(slides[0], "You"); return; }
+    if (jumps.length > 0) { startHumanJump(jumps[0], candidates); return; }
+
+    if (C.owner(state.board.squares[sq]) === humanSide()
+        && moves.some(m => m[0] === sq)) {
+      state.selectedFrom = sq;
+      render();
+    }
+  }
+
+  function startHumanJump(firstCandidate, allCandidates) {
+    const firstHopPath = firstCandidate.slice(0, 3);
+    const matching = allCandidates.filter(m => pathStartsWith(m, firstHopPath));
+    if (matching.length === 1) { commitMove(matching[0], "You"); return; }
+    if (matching.every(m => arrayEq(m, matching[0]))) {
+      commitMove(matching[0], "You");
+      return;
+    }
+    state.pendingJumpPath = firstHopPath;
+    state.selectedFrom = -1;
+    render();
+  }
+
+  function tryExtendJump(sq, moves) {
+    const path = state.pendingJumpPath;
+    const continuations = moves.filter(m =>
+      pathStartsWith(m, path) && m.length > path.length
+    );
+    const matches = continuations.filter(m => m[path.length + 1] === sq);
+    if (matches.length === 0) return;
+    const nextCap = matches[0][path.length];
+    const nextLand = matches[0][path.length + 1];
+    const newPath = path.concat([nextCap, nextLand]);
+    const furtherChoices = matches.filter(m => m.length > newPath.length);
+    if (furtherChoices.length === 0) {
+      const terminator = matches.find(m => arrayEq(m, newPath)) || matches[0];
+      commitMove(terminator, "You");
+      return;
+    }
+    state.pendingJumpPath = newPath;
+    render();
+  }
+
+  // ---- Committing a move (human or AI) ----
+  function describeMove(move) {
+    if (move.length === 2) return `${move[0] + 1} → ${move[1] + 1}`;
+    const stops = [move[0] + 1];
+    for (let i = 2; i < move.length; i += 2) stops.push(move[i] + 1);
+    return stops.join(" → ");
+  }
+
+  function commitMove(move, actor) {
+    state.lastFrom = move[0];
+    state.lastTo = move[move.length - 1];
+    state.lastCaptured = [];
+    if (move.length > 2) {
+      for (let i = 1; i < move.length; i += 2) state.lastCaptured.push(move[i]);
+    }
+    state.board = C.applyMove(state.board, move);
+    state.selectedFrom = -1;
+    state.pendingJumpPath = null;
+
+    const key = C.stateKey(state.board);
+    state.stateCounts[key] = (state.stateCounts[key] || 0) + 1;
+
+    appendHistory(actor, move);
+    render();
+    updatePosEval();
+    updatePieceCounts();
+    updateButtons();
+    if (checkEnd()) { updateButtons(); return; }
+
+    maybeStartAiTurn();
+  }
+
+  function checkEnd() {
+    const key = C.stateKey(state.board);
+    if (state.stateCounts[key] >= 3) {
+      state.finished = true;
+      log("Draw by threefold repetition.");
+      return true;
+    }
+    if (state.board.moveCount >= 200) {
+      state.finished = true;
+      log("Draw by move cap.");
+      return true;
+    }
+    const [over, winner] = C.isGameOver(state.board);
+    if (over) {
+      state.finished = true;
+      if (winner === humanSide()) log("You win!");
+      else if (winner === -humanSide()) log("AI wins.");
+      else log("Draw.");
+      return true;
+    }
+    return false;
+  }
+
+  // ---- AI turn ----
+  function maybeStartAiTurn() {
+    if (state.finished) return;
+    if (!state.gameActive) return;
+    if (state.board.currentPlayer === humanSide()) return;
+    if (!state.netReady) {
+      log("(waiting for opponent weights to finish loading…)");
+      return;
+    }
+
+    state.aiThinking = true;
+    log(`AI is thinking at depth ${AI_DEPTH}…`);
+    updateButtons();
+
+    // Yield one paint so the banner updates before we block the main thread
+    // inside pickMove. setTimeout + a short pad make the move feel deliberate
+    // for fast endgames without artificially dragging out the user-facing
+    // latency of deep searches.
+    setTimeout(() => {
+      const searchStart = performance.now();
+      const result = M.pickMove(state.board, AI_DEPTH, state.aiNet);
+      const searchMs = performance.now() - searchStart;
+      state.aiThinkMs += searchMs;
+      state.aiMoveCount += 1;
+      updateThinkDisplay();
+      const pad = Math.max(0, MIN_SEARCH_PAD_MS - searchMs);
+      setTimeout(() => {
+        state.aiThinking = false;
+        if (!result.move) {
+          state.finished = true;
+          log("AI has no legal moves; you win!");
+          updateButtons();
+          return;
+        }
+        commitMove(result.move, "AI");
+      }, pad);
+    }, THINKING_YIELD_MS);
+  }
+
+  // ---- Side-panel updates ----
+  function updatePieceCounts() {
+    const squares = state.board.squares;
+    let bMen = 0, bKings = 0, wMen = 0, wKings = 0;
+    for (let i = 0; i < 32; i++) {
+      const p = squares[i];
+      if (p === C.BLACK_PIECE) bMen++;
+      else if (p === C.BLACK_KING) bKings++;
+      else if (p === C.WHITE_PIECE) wMen++;
+      else if (p === C.WHITE_KING) wKings++;
+    }
+    const you = humanSide() === C.BLACK ? [bMen + bKings, bKings] : [wMen + wKings, wKings];
+    const ai  = humanSide() === C.BLACK ? [wMen + wKings, wKings] : [bMen + bKings, bKings];
+    document.getElementById("count-you").textContent = String(you[0]);
+    document.getElementById("kings-you").textContent = String(you[1]);
+    document.getElementById("count-ai").textContent  = String(ai[0]);
+    document.getElementById("kings-ai").textContent  = String(ai[1]);
+    const row = document.getElementById("piece-row-you");
+    const rowAi = document.getElementById("piece-row-ai");
+    row.classList.toggle("low", you[0] <= 3);
+    rowAi.classList.toggle("low", ai[0] <= 3);
+  }
+
+  function updatePosEval() {
+    if (!state.netReady) return;
+    // network.forward gives the score from current-side-to-move's perspective.
+    // Flip to show from the human's perspective so +ve always means "you ahead".
+    const rawScore = state.aiNet.forward(state.board);
+    const fromCurrent = rawScore;
+    const fromHuman = (state.board.currentPlayer === humanSide())
+      ? fromCurrent
+      : -fromCurrent;
+    const pct = Math.max(-1, Math.min(1, fromHuman));
+    const fill = ((pct + 1) / 2) * 100;
+    document.getElementById("eval-bar-fill").style.width = fill + "%";
+    document.getElementById("eval-number").textContent =
+      (pct >= 0 ? "+" : "") + pct.toFixed(3);
+    let verdict;
+    if (Math.abs(pct) < 0.08) verdict = "roughly even";
+    else if (pct >=  0.30)    verdict = "you ahead";
+    else if (pct >=  0.08)    verdict = "slight edge to you";
+    else if (pct <= -0.30)    verdict = "AI ahead";
+    else                       verdict = "slight edge to AI";
+    document.getElementById("eval-verdict").textContent = verdict;
+  }
+
+  function updateThinkDisplay() {
+    document.getElementById("ai-move-count").textContent = String(state.aiMoveCount);
+    document.getElementById("think-time").textContent =
+      (state.aiThinkMs / 1000).toFixed(1) + " s total";
+  }
+
+  // ---- Move history ----
+  function appendHistory(actor, move) {
+    const li = document.createElement("li");
+    li.textContent = `${actor}: ${describeMove(move)}`;
+    li.className = (actor === "You") ? "mh-you" : "mh-ai";
+    moveHistoryEl.appendChild(li);
+    moveHistoryEl.scrollTop = moveHistoryEl.scrollHeight;
+  }
+
+  // ---- Buttons ----
+  function onOfferDraw() {
+    if (state.finished || state.aiThinking || !state.netReady) return;
+    if (state.board.currentPlayer !== humanSide()) return;
+    const human = state.aiNet.forward(state.board);
+    const ai = -human;
+    const ACCEPT_THRESHOLD = 0.30;
+    if (ai <= ACCEPT_THRESHOLD) {
+      state.finished = true;
+      log(`Draw agreed. AI eval from its side: ${ai >= 0 ? "+" : ""}${ai.toFixed(2)}.`);
+      updateButtons();
+    } else {
+      log(`AI declines the draw — it evaluates its position at +${ai.toFixed(2)}.`);
+    }
+  }
+
+  function onAskResign() {
+    if (state.finished || state.aiThinking || !state.netReady) return;
+    if (state.board.currentPlayer !== humanSide()) return;
+    const ai = -state.aiNet.forward(state.board);
+    const RESIGN_THRESHOLD = -0.65;
+    if (ai <= RESIGN_THRESHOLD) {
+      state.finished = true;
+      log(`AI resigns — it evaluates its position at ${ai.toFixed(2)}. You win.`);
+      updateButtons();
+    } else {
+      log(`AI plays on — it evaluates its position at ${ai >= 0 ? "+" : ""}${ai.toFixed(2)}.`);
+    }
+  }
+
+  function onResign() {
+    if (state.finished || state.aiThinking) return;
+    if (state.board.currentPlayer !== humanSide()) return;
+    if (!confirm("Resign this game?")) return;
+    state.finished = true;
+    log("You resigned. AI wins.");
+    updateButtons();
+  }
+
+  function updateButtons() {
+    const yourTurn = state.gameActive && !state.finished && !state.aiThinking
+                     && state.board.currentPlayer === humanSide();
+    offerDrawBtn.disabled = !yourTurn || !state.netReady;
+    askResignBtn.disabled = !yourTurn || !state.netReady;
+    resignBtn.disabled    = !yourTurn;
+  }
+
+  // ---- New game ----
+  function resetGame(autoStart) {
+    state.board = C.makeBoard();
+    state.selectedFrom = -1;
+    state.pendingJumpPath = null;
+    state.lastFrom = -1;
+    state.lastTo = -1;
+    state.lastCaptured = [];
+    state.stateCounts = Object.create(null);
+    state.finished = false;
+    state.humanColor = humanColorSel.value;
+    state.gameActive = !!autoStart;
+    state.aiThinking = false;
+    state.aiMoveCount = 0;
+    state.aiThinkMs = 0;
+    updateThinkDisplay();
+    moveHistoryEl.innerHTML = "";
+    log(state.gameActive
+      ? "New game — your move."
+      : "Pick your color, then click New game to start.");
+
+    render();
+    updatePieceCounts();
+    updatePosEval();
+    updateButtons();
+
+    if (state.gameActive) maybeStartAiTurn();
+  }
+
+  canvas.addEventListener("click", onCanvasClick);
+  newGameBtn.addEventListener("click", () => resetGame(true));
+  offerDrawBtn.addEventListener("click", onOfferDraw);
+  askResignBtn.addEventListener("click", onAskResign);
+  resignBtn.addEventListener("click", onResign);
+  humanColorSel.addEventListener("change", () => resetGame(false));
+
+  // Boot.
+  resetGame(false);
+  loadOpponent();
+})();

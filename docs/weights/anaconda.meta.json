@@ -1,0 +1,8 @@
+{
+  "source": "random init (seed 1729, --init-random 2001)",
+  "architecture": "Anaconda (2001)",
+  "arch_key": "2001",
+  "nWeights": 5048,
+  "generations": null,
+  "note": "Untrained random-init weights shipped as a placeholder. To get a real opponent, train locally and re-run this export."
+}

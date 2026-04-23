@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Blondie24 Reborn — Fully Evolved Anaconda</title>
+<link rel="stylesheet" href="css/style.css" />
+<style>
+  /* Two-column layout — play-strong has no live-evolve "extras" panels
+     (leaderboard / mini-replay / network-architecture / history-chart). */
+  #game {
+    grid-template-columns: 480px minmax(240px, 1fr);
+    grid-template-areas: "board status";
+  }
+  @media (max-width: 900px) {
+    #game {
+      grid-template-columns: 1fr;
+      grid-template-areas: "board" "status";
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Blondie24 Reborn — Fully Evolved</h1>
+    <p class="subtitle">Play the frozen champion from a finished training run.</p>
+    <details id="about" open>
+      <summary>What am I looking at?</summary>
+      <p>
+        This is the companion to the <a href="./">live-evolve demo</a>.
+        Instead of watching a population learn in real time, you play against
+        the <b>finished product</b>: a 2001 "Anaconda" network with <b>5,048
+        evolvable weights</b>, trained by pure evolutionary programming for
+        many generations of self-play, then frozen and checked into this repo.
+      </p>
+      <p>
+        No training happens while you play — the opponent is the fixed output
+        of that offline training run. The AI gets a <b>depth-6</b> minimax
+        search on every move, so it thinks a little longer than the live-evolve
+        demo's depth-4. That tends to take a second or two per move once the
+        middlegame opens up; endgames are faster.
+      </p>
+      <p>
+        The model was trained with
+        <code>python -m training.train --preset paper-2001-strict --generations 850</code>
+        — the strict paper-faithful configuration (μ+μ selection, no
+        quiescence-extension hack). See the
+        <a href="https://github.com/brendanbabb/blondie24-reborn" target="_blank" rel="noreferrer">repo README</a>
+        for the full deviation / fidelity breakdown and training instructions.
+      </p>
+    </details>
+  </header>
+
+  <section id="game">
+    <div id="board-wrap">
+      <section id="controls">
+        <button id="new-game">New game</button>
+        <button id="offer-draw" type="button">Offer draw</button>
+        <button id="ask-resign" type="button">Ask AI to resign</button>
+        <button id="resign" type="button" class="danger">Resign</button>
+        <label>
+          You play
+          <select id="human-color">
+            <option value="white">White (AI moves first)</option>
+            <option value="black">Black (you move first)</option>
+          </select>
+        </label>
+      </section>
+      <canvas id="board" width="480" height="480"></canvas>
+      <div id="status-banner" hidden></div>
+      <div id="move-log" aria-live="polite"></div>
+      <ol id="move-history" aria-label="Move history"></ol>
+    </div>
+
+    <aside id="side-panel">
+      <div class="panel" id="pieces-panel">
+        <h2>Pieces</h2>
+        <div class="piece-row" id="piece-row-you">
+          <span class="pip pip-you"></span>
+          <span class="who">You</span>
+          <span class="count"><span id="count-you">12</span><span class="unit">pcs</span></span>
+          <span class="kings"><span id="kings-you">0</span><span class="unit">kings</span></span>
+        </div>
+        <div class="piece-row" id="piece-row-ai">
+          <span class="pip pip-ai"></span>
+          <span class="who">AI</span>
+          <span class="count"><span id="count-ai">12</span><span class="unit">pcs</span></span>
+          <span class="kings"><span id="kings-ai">0</span><span class="unit">kings</span></span>
+        </div>
+      </div>
+
+      <div class="panel" id="info-panel">
+        <h2>Opponent</h2>
+        <div class="stat"><span class="label">Architecture</span><span id="arch-label">Anaconda (2001)</span></div>
+        <div class="stat"><span class="label">Evolvable weights</span><span id="weights-label">—</span></div>
+        <div class="stat"><span class="label">Training source</span><span id="training-label">—</span></div>
+        <div class="stat"><span class="label">Search depth</span><span id="depth-label">6 plies</span></div>
+        <div class="stat"><span class="label">AI think time</span><span id="think-time">—</span></div>
+        <div class="stat"><span class="label">AI moves made</span><span id="ai-move-count">0</span></div>
+      </div>
+
+      <div class="panel" id="eval-panel">
+        <h2>How the AI sees the board</h2>
+        <p class="legend">
+          The network's score of the current position, flipped to be shown
+          from <b>your</b> viewpoint. Range [−1, +1].
+        </p>
+        <div id="eval-bar-wrap">
+          <div id="eval-bar">
+            <div id="eval-bar-fill"></div>
+            <div id="eval-bar-center"></div>
+          </div>
+          <div class="eval-labels">
+            <span>AI ahead</span>
+            <span>even</span>
+            <span>You ahead</span>
+          </div>
+        </div>
+        <div class="eval-summary">
+          <span id="eval-number">—</span>
+          <span id="eval-verdict" class="dim">waiting for AI to move…</span>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+</main>
+
+<script src="js/checkers.js?v=6"></script>
+<script src="js/render.js?v=6"></script>
+<script src="js/anaconda-network.js?v=6"></script>
+<script src="js/minimax.js?v=6"></script>
+<script src="js/play-strong.js?v=6"></script>
+</body>
+</html>

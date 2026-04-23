@@ -24,6 +24,24 @@ Or enable GitHub Pages (Settings → Pages → Source: `main` / `/docs`) and sha
 demo code deliberately has no build step, no dependencies, and no network calls. See
 [`docs/index.html`](./docs/index.html) for the explanation that renders in-page.
 
+### Companion page: play the fully-evolved Anaconda
+
+[`docs/play-strong.html`](./docs/play-strong.html) is a second browser page that plays against
+a **frozen, pre-trained** 2001 Anaconda network (5,048 weights, 91 sub-board filters +
+92→40→10→1 MLP) loaded from `docs/weights/anaconda.bin`. Unlike the live-evolve page, no
+training happens while you play — it's the finished product of an offline training run. The AI
+searches at depth 6 on every move. Pure static — same GitHub Pages deployment, no extra setup.
+
+The page ships with a random-init placeholder `anaconda.bin` so the pipeline is testable out
+of the box; to get the real expert-level opponent the paper describes, train locally and
+overwrite the bin (instructions in the [training section below](#training-the-anaconda-opponent)).
+
+The JS Anaconda inference (`docs/js/anaconda-network.js`) is a pure-JavaScript port of
+[`neural/anaconda_network.py`](./neural/anaconda_network.py). It's cross-checked against the
+Python forward pass on five fixed positions to ~1e-8 agreement (see
+[`docs/test_anaconda.js`](./docs/test_anaconda.js)) so the browser plays the **same** network
+the Python side trained.
+
 What you'll see:
 
 - **Playable board** with circular checker pieces, gold king markers, last-move highlights,
@@ -143,6 +161,35 @@ The (μ+μ) selection keeps strong parents in the evaluation pool alongside offs
 raises the population's mean fitness and tightens elite consistency. The quiescence-off
 per-search speedup compensates for most of the 2× tournament work, so true-paper fidelity
 costs only about 7 extra minutes per 850 generations.
+
+### Training the Anaconda opponent
+
+The [companion browser page](#companion-page-play-the-fully-evolved-anaconda) loads a frozen
+Anaconda network from `docs/weights/anaconda.bin`. The repo ships a random-init placeholder
+there so the page works out of the box. To replace it with a real trained opponent:
+
+```bash
+# Step 1: train. ~47 min on a 24-core box for 850 generations at strict paper fidelity.
+python -m training.train --preset paper-2001-strict --generations 850 --workers 20
+
+# Step 2: export the champion's flat weight vector to the browser demo's bin file.
+python scripts/export_weights_to_js.py checkpoints/best_gen0850.pt docs/weights/anaconda.bin
+```
+
+That writes both `docs/weights/anaconda.bin` (5,048 × float32 = ~20 KB) and a sidecar
+`anaconda.meta.json` with provenance (checkpoint name, gen count) that the play-strong page
+displays. Commit both and the GitHub-Pages-deployed opponent updates automatically.
+
+Verify the JS port still matches the new weights with:
+
+```bash
+python scripts/export_weights_to_js.py checkpoints/best_gen0850.pt docs/weights/anaconda.bin \
+    --fixtures docs/weights/anaconda-fixtures.json
+node docs/test_anaconda.js
+```
+
+`test_anaconda.js` runs the JS Anaconda network on five representative boards and asserts
+|js − python| < 1e-6 — catches any drift in layout, encoding, or forward-pass assumptions.
 
 ---
 
