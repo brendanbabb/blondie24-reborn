@@ -5,6 +5,36 @@
 A feedforward neural network with no hand-crafted evaluation, no opening book, no endgame database,
 and no backprop — trained entirely by self-play under an evolutionary strategy.
 
+## Try it in your browser
+
+A GitHub-Pages-deployable demo lives under [`docs/`](./docs). It's a pure-static, vanilla-JS
+re-implementation of the 1999 architecture with a twist: the AI **evolves while you play it**.
+Every time the AI's turn arrives it runs ~1 second of self-play evolution in a Web Worker, then
+picks a move with the freshly-evolved champion network. Over a 30-move game the population runs
+through ~100–300 generations — a real slice of the paper's training curve, compressed into a
+single play session.
+
+No install. Just serve the folder:
+
+```bash
+cd docs && python -m http.server --bind 127.0.0.1 8765
+```
+
+Or enable GitHub Pages (Settings → Pages → Source: `main` / `/docs`) and share the URL. The
+demo code deliberately has no build step, no dependencies, and no network calls. See
+[`docs/index.html`](./docs/index.html) for the explanation that renders in-page.
+
+What you'll see:
+
+- The board you're playing on, with legal-move dots and forced-capture banners
+- A live mini-board that replays one of the AI's self-play training games while you think,
+  alternating between two different match-ups each round ("Game A" / "Game B")
+- A network-architecture panel that redraws on every AI move — the 1,743-weight net
+  laid out as 4 columns of nodes (32 → 40 → 10 → 1) with the 40 strongest weights per layer
+  drawn as colored edges (red negative, blue positive). Watch the edges shift as evolution reshapes
+  the champion from move to move.
+- Generation counter, gens/sec, and total AI compute time per game
+
 > **A note on the name.** "Blondie24" is the screen name used on Zone.com by the 2001 "Anaconda"
 > system (Chellapilla & Fogel 2001), which added a spatial-preprocessing layer on top of the 1999
 > network and reached expert-level (~2045 USCF) play. Both architectures are implemented here —
