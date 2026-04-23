@@ -177,12 +177,17 @@
         const cy = y + cell / 2;
         const isBlack = piece === C.BLACK_PIECE || piece === C.BLACK_KING;
         const isKing  = piece === C.BLACK_KING || piece === C.WHITE_KING;
+        // Mini-board pieces are tiny (~3-4px radius). The main-board edge
+        // colors (#000 around black pieces, #888 around white) wash out at
+        // this scale — black-on-dark-brown becomes nearly invisible. Use
+        // bright white edges so every piece reads against either square
+        // color, and bump the line width relative to the small piece.
         ctx.beginPath();
         ctx.arc(cx, cy, pr, 0, Math.PI * 2);
         ctx.fillStyle = isBlack ? COLOR.blackPiece : COLOR.whitePiece;
         ctx.fill();
-        ctx.strokeStyle = isBlack ? COLOR.blackPieceEdge : COLOR.whitePieceEdge;
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = isBlack ? "#f0f0f0" : "#1a1410";
+        ctx.lineWidth = 1.8;
         ctx.stroke();
         if (isKing) {
           ctx.beginPath();
