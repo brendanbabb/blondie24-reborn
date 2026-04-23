@@ -15,17 +15,26 @@
 
   const WIN = 1e6;
 
+  // Order moves so captures (and bigger captures) are searched first. With
+  // forced-jump rules, if ANY capture exists every move is a capture — so
+  // within such a list, ordering by descending capture-chain length finds
+  // big material swings early and lets alpha-beta prune harder. When every
+  // move is a slide this is a no-op.
+  function orderMoves(moves) {
+    if (moves.length <= 1) return moves;
+    // Captures have length >= 3 ([from, cap, land, ...]); slides have length 2.
+    return moves.slice().sort((a, b) => b.length - a.length);
+  }
+
   function pickMove(board, depth, network) {
-    const moves = C.getLegalMoves(board);
-    if (moves.length === 0) return { move: null, score: -WIN };
+    const raw = C.getLegalMoves(board);
+    if (raw.length === 0) return { move: null, score: -WIN };
+    const moves = orderMoves(raw);
 
     let bestMove = moves[0];
     let bestScore = -Infinity;
     let alpha = -Infinity;
     const beta = Infinity;
-
-    // Optional: order moves by quick leaf eval to improve pruning. For pop=6
-    // and depth=4 with only ~8 moves at the root, unordered is already fast.
 
     for (let i = 0; i < moves.length; i++) {
       const next = C.applyMove(board, moves[i]);
@@ -45,7 +54,7 @@
     }
     if (depth === 0) return network.forward(board);
 
-    const moves = C.getLegalMoves(board);
+    const moves = orderMoves(C.getLegalMoves(board));
     let best = -Infinity;
     for (let i = 0; i < moves.length; i++) {
       const next = C.applyMove(board, moves[i]);

@@ -37,7 +37,7 @@
   const AI_DEPTH = 4;
   const TRAIN_BURST_MS = 3000;   // evolution runs this long per AI turn
   const MIN_SEARCH_PAD_MS = 200; // small UX pad so moves don't snap instantly
-  const PRETRAIN_GENS = 3;       // gens to run between New Game and first move
+  const PRETRAIN_GENS = 1;       // gens to run between New Game and first move
 
   const state = {
     board: C.makeBoard(),
@@ -136,14 +136,25 @@
       }
       return;
     }
+    if (msg.type === "error") {
+      console.error("Worker-reported error:", msg.message, msg.stack);
+      showBanner("", "Training worker error: " + msg.message + ". Click New Game to reset.");
+      state.aiThinking = false;
+      state.preTraining = false;
+      updateButtons();
+      return;
+    }
   };
 
   function snapshot() {
     return new Promise((resolve, reject) => {
+      // Generous timeout: deep-depth endgame gens can keep the worker busy for
+      // several seconds; pause + snapshot can't run until the current gen
+      // finishes because each gen is a synchronous chunk of CPU work.
       const timeoutId = setTimeout(() => {
-        if (pendingSnapshot === resolve) pendingSnapshot = null;
-        reject(new Error("snapshot timeout"));
-      }, 3000);
+        if (pendingSnapshot) pendingSnapshot = null;
+        reject(new Error("snapshot timeout after 8s"));
+      }, 8000);
       pendingSnapshot = (msg) => { clearTimeout(timeoutId); resolve(msg); };
       worker.postMessage({ type: "snapshot" });
     });

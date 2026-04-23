@@ -36,9 +36,9 @@ const GAMES_PER_INDIVIDUAL = 3;   // paper uses 5; 3 gives reasonable ranking at
 // plies to actually convert material into wins — at a flat depth 3 most
 // winning endgames degenerate into shuffle draws via threefold repetition.
 const TRAIN_DEPTH_OPENING  = 3;
-const TRAIN_DEPTH_ENDGAME  = 7;
+const TRAIN_DEPTH_ENDGAME  = 5;      // above this the Int8Array churn from deep cloning can hang the worker
 const ENDGAME_PIECE_THRESHOLD = 6;   // <= this many total pieces → use endgame depth
-const MAX_GAME_MOVES = 100;       // move cap for self-play games
+const MAX_GAME_MOVES = 80;        // move cap for self-play games (shorter than the user-facing game cap to keep training decisive)
 
 const WIN_SCORE = 1.0;
 const DRAW_SCORE = 0.0;
@@ -246,18 +246,28 @@ function topSnapshot() {
 function scheduleNext() {
   if (!running) { nextTask = null; return; }
   nextTask = setTimeout(() => {
-    const prevGen = generation;
-    runOneGen();
-    // After each gen, report stats + leaderboard.
-    postMessage({
-      type: "gen",
-      gen: generation,
-      leaderboard: leaderboardSnapshot(),
-      meanFitness: population.reduce((s, x) => s + x.fitness, 0) / POP_SIZE,
-      maxFitness: Math.max.apply(null, population.map(x => x.fitness)),
-      sampleGameA: _lastSampleGameA,
-      sampleGameB: _lastSampleGameB,
-    });
+    try {
+      runOneGen();
+      postMessage({
+        type: "gen",
+        gen: generation,
+        leaderboard: leaderboardSnapshot(),
+        meanFitness: population.reduce((s, x) => s + x.fitness, 0) / POP_SIZE,
+        maxFitness: Math.max.apply(null, population.map(x => x.fitness)),
+        sampleGameA: _lastSampleGameA,
+        sampleGameB: _lastSampleGameB,
+      });
+    } catch (err) {
+      // Surface the error to the main thread instead of silently hanging the
+      // loop. Main can show the real cause in the status banner / console.
+      running = false;
+      postMessage({
+        type: "error",
+        message: (err && err.message) || String(err),
+        stack:   (err && err.stack) || "",
+      });
+      return;
+    }
     scheduleNext();
   }, 0);
 }
