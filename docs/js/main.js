@@ -35,7 +35,7 @@
   const humanColorSel = document.getElementById("human-color");
 
   const AI_DEPTH = 4;
-  const TRAIN_BURST_MS = 3000;   // evolution runs this long per AI turn
+  const TRAIN_BURST_MS = 2000;   // evolution runs this long per AI turn
   const MIN_SEARCH_PAD_MS = 200; // small UX pad so moves don't snap instantly
   const PRETRAIN_GENS = 1;       // gens to run between New Game and first move
 
@@ -396,7 +396,9 @@
 
   function appendMoveHistory(actor, move, captured, extra) {
     const path = describeMove(move);
-    const capMsg = captured && captured.length ? ` × ${captured.join(",")}` : "";
+    const capMsg = captured && captured.length
+      ? ` × ${captured.map(sq => sq + 1).join(",")}`
+      : "";
     const meta = extra ? `<span class="meta"> ${extra}</span>` : "";
     const klass = actor.startsWith("AI") ? "actor-ai" : "actor-you";
     const li = document.createElement("li");
@@ -522,7 +524,7 @@
         showBanner("", "You must continue the jump — click the next green dot.");
       } else {
         const count = pieces.size;
-        const piecesList = Array.from(pieces).sort((a, b) => a - b).join(", ");
+        const piecesList = Array.from(pieces).sort((a, b) => a - b).map(sq => sq + 1).join(", ");
         showBanner("", `Capture is mandatory. ${count} of your pieces can jump (square${count > 1 ? "s" : ""}: ${piecesList}).`);
       }
     } else {
@@ -662,7 +664,9 @@
     state.stateCounts[key] = (state.stateCounts[key] || 0) + 1;
 
     const path = describeMove(move);
-    const capMsg = captured.length ? ` (captured ${captured.join(", ")})` : "";
+    const capMsg = captured.length
+      ? ` (captured ${captured.map(sq => sq + 1).join(", ")})`
+      : "";
     log(`${actor}: ${path}${capMsg}`);
     const metaGen = actor.startsWith("AI ") ? actor.replace(/^AI\s*/, "(") + ")" : "";
     appendMoveHistory(actor.startsWith("AI") ? "AI" : "You", move, captured, metaGen);
@@ -676,10 +680,12 @@
     maybeStartAiTurn();
   }
 
+  // Human-readable move notation. Squares shown 1-indexed to match the
+  // board labels (which display sq+1). Internally we still use 0-31.
   function describeMove(move) {
-    if (move.length === 2) return `${move[0]} → ${move[1]}`;
-    const stops = [move[0]];
-    for (let i = 2; i < move.length; i += 2) stops.push(move[i]);
+    if (move.length === 2) return `${move[0] + 1} → ${move[1] + 1}`;
+    const stops = [move[0] + 1];
+    for (let i = 2; i < move.length; i += 2) stops.push(move[i] + 1);
     return stops.join(" → ");
   }
 
@@ -872,9 +878,11 @@
   function miniCaptionFor(game, step) {
     const frames = game.frames;
     const moveNum = step;
-    const br = game.blackRank ? " (rank " + game.blackRank + ")" : "";
-    const wr = game.whiteRank ? " (rank " + game.whiteRank + ")" : "";
-    const label = `#${game.blackIdx}${br} vs #${game.whiteIdx}${wr}`;
+    const br = game.blackRank ? " r" + game.blackRank : "";
+    const wr = game.whiteRank ? " r" + game.whiteRank : "";
+    // B: = Black side's network, W: = White side's network. Rank (rX) is
+    // 1 = tournament best, 6 = worst. Network index (#N) is the population slot.
+    const label = `B:#${game.blackIdx}${br} vs W:#${game.whiteIdx}${wr}`;
     if (step >= frames.length - 1) {
       const w = game.winner;
       const outcome = w === 1 ? "Black wins" : w === -1 ? "White wins" : "Draw";

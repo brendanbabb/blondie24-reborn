@@ -73,10 +73,11 @@
           ctx.fillRect(x, y, SQUARE_PX, SQUARE_PX);
         }
 
-        // Square number label (dim, small)
+        // Square number label (1-indexed for display; matches standard
+        // checkers notation where dark squares are numbered 1-32).
         ctx.fillStyle = "rgba(0,0,0,0.35)";
         ctx.font = "10px -apple-system, Segoe UI, sans-serif";
-        ctx.fillText(String(sq), x + 4, y + 12);
+        ctx.fillText(String(sq + 1), x + 4, y + 12);
 
         const piece = board.squares[sq];
         if (piece !== C.EMPTY) {

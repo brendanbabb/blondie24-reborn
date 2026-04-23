@@ -20,17 +20,17 @@
         endgame database, and no backpropagation — only self-play under an
         evolutionary strategy. <a href="https://github.com/brendanbabb/blondie24-reborn" target="_blank" rel="noreferrer">Source on GitHub</a>.
       </p>
-      <p><b>Every AI turn, here's what happens in roughly three seconds:</b></p>
+      <p><b>Every AI turn, here's what happens in roughly two seconds:</b></p>
       <ol>
-        <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>3 self-play games</b> against random opponents from the group. Training search goes <b>3 plies deep</b> — much deeper (<b>7 plies</b>) once the endgame kicks in (≤ 6 total pieces), so winning king-up positions get converted cleanly instead of shuffling to a repetition draw.</li>
+        <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>3 self-play games</b> against random opponents from the group. Training search goes <b>3 plies deep</b> — deeper (<b>5 plies</b>) once the endgame kicks in (≤ 6 total pieces), so winning king-up positions get converted instead of shuffling to a repetition draw.</li>
         <li>Games are scored <b>+1 win / 0 draw / −2 loss</b> (paper's asymmetric scoring). The top 3 networks survive; the bottom 3 are replaced by <b>Gaussian-mutated offspring</b> of the survivors.</li>
-        <li>That's <b>one generation</b>. The browser runs as many gens as fit into those three seconds — typically 6–15 at these settings.</li>
+        <li>That's <b>one generation</b>. The browser runs as many gens as fit into those two seconds — typically 4–10 at these settings.</li>
         <li>Time's up. The current <b>top-ranked network</b> runs depth-4 minimax from the board you see and plays a move. The snapshot is frozen — it doesn't change while you think.</li>
       </ol>
       <p>
         Evolution is paused during your turn, so the AI you face at any point was the fittest
         in the last-completed tournament. Across ~30 AI turns in a game, the population runs
-        through <b>~150–300 generations</b> — a substantial fraction of what the paper used to
+        through <b>~100–200 generations</b> — a meaningful fraction of what the paper used to
         reach Class-A play. Watch the generation counter climb and the
         network-architecture panel's connections shift as evolution reshapes the weights.
       </p>
@@ -140,9 +140,9 @@
         <p class="legend">
           Two training games from the most recent generation, replayed here
           while you think. When possible we pick decisive games pitting a
-          <b>top-ranked network against a lower-ranked one</b> — more
-          instructive than mid-pack matchups. Alternates
-          <b>Game A</b> ↔ <b>Game B</b>.
+          <b>top-ranked network against a lower-ranked one</b> —
+          rank <b>1</b> is the tournament winner, rank <b>6</b> is the
+          loser. Alternates <b>Game A</b> ↔ <b>Game B</b>.
         </p>
         <div class="mini-cell">
           <span class="mini-label" id="mini-label">—</span>

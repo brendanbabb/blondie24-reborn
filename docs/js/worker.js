@@ -177,10 +177,9 @@ function runOneGen() {
     }
   }
 
-  // Compute each network's rank from the current tournament (1 = best fitness).
-  // We need this BEFORE selection reshuffles population, and we use it to
-  // attach rank metadata to recordings and to prefer games where a high-ranked
-  // network played a low-ranked one (more instructive to watch).
+  // Compute each network's rank from the current tournament.
+  // 1-indexed: rank 1 is best (highest fitness), rank POP_SIZE is worst.
+  // We never assign rank 0 — the +1 below makes that explicit.
   const rankOf = new Array(POP_SIZE);
   const scored = population.map((ind, i) => ({ idx: i, fit: ind.fitness }));
   scored.sort((a, b) => b.fit - a.fit);
