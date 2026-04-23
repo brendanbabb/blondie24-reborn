@@ -76,7 +76,7 @@
 
   // ---- Worker setup ---------------------------------------------------------
 
-  const worker = new Worker("js/worker.js?v=5");
+  const worker = new Worker("js/worker.js?v=6");
   let pendingSnapshot = null;  // Promise resolver while a snapshot is in flight
 
   worker.onerror = (ev) => {

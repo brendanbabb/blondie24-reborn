@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Blondie24 — main-thread bench</title>
+<style>
+  body { font-family: "SF Mono", Consolas, monospace; background: #14171f; color: #dfe4ee; padding: 20px; line-height: 1.5; }
+  button { background: #f4b942; color: #1a1410; border: none; padding: 10px 24px; font-size: 14px; font-weight: 600; border-radius: 6px; cursor: pointer; }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  pre { background: #1c1f28; padding: 14px 18px; border-radius: 6px; border: 1px solid #2a2f3d; overflow-x: auto; }
+  a { color: #8ecae6; }
+  h1 { margin-top: 0; }
+  .dim { color: #8b94a6; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Main-thread bench</h1>
+<p>Runs the <b>same</b> self-play tournament the Worker runs (POP_SIZE=6, 3 games per
+individual per gen, depth-4 minimax, paper scoring) — but synchronously on the
+page's <b>main thread</b>, not in a Worker. The button locks up the tab for a few
+seconds while it runs.</p>
+<p class="dim">
+  Goal: compare Chrome V8 main-thread throughput vs. the Worker (~480 ms/gen on
+  your box) vs. Node (~200 ms/gen on the same JS).
+  If main-thread ≈ Node, the Worker context is specifically the bottleneck.
+  If main-thread ≈ Worker, Chrome V8 is just slower than Node V8 on this machine.
+</p>
+<p><a href="./">← back to the demo</a></p>
+
+<button id="run">Run 5 gens on main thread</button>
+<pre id="out">(ready)</pre>
+
+<script src="js/checkers.js?v=6"></script>
+<script src="js/network.js?v=6"></script>
+<script src="js/minimax.js?v=6"></script>
+<script>
+(function () {
+  "use strict";
+  const C = self.Checkers, N = self.Network, M = self.Minimax;
+  const out = document.getElementById("out");
+  const btn = document.getElementById("run");
+  function log(s) { out.textContent += s + "\n"; }
+
+  const POP_SIZE = 6, GAMES_PER_INDIVIDUAL = 3;
+  const TRAIN_SEARCH_DEPTH = 4;
+  const MAX_GAME_MOVES = 80;
+
+  // Same as worker.js — wrap weights in a Network ONCE per individual and
+  // reuse across every game it plays. See worker.js makeIndividual comment.
+  function makeIndividual(weights, sigmas) {
+    return {
+      weights, sigmas,
+      net: N.makeNetwork(weights),
+      fitness: 0, wins: 0, losses: 0, draws: 0,
+    };
+  }
+
+  function playGame(black, white) {
+    let board = C.makeBoard();
+    const counts = Object.create(null);
+    let plies = 0;
+    while (plies < MAX_GAME_MOVES) {
+      const [over] = C.isGameOver(board);
+      if (over) return plies;
+      const key = C.stateKey(board);
+      counts[key] = (counts[key] || 0) + 1;
+      if (counts[key] >= 3) return plies;
+      const net = board.currentPlayer === C.BLACK ? black.net : white.net;
+      const { move } = M.pickMove(board, TRAIN_SEARCH_DEPTH, net);
+      if (!move) return plies;
+      board = C.applyMove(board, move);
+      plies++;
+    }
+    return plies;
+  }
+
+  function runOneGen(pop) {
+    let totalPlies = 0;
+    for (let i = 0; i < POP_SIZE; i++) {
+      const opps = [];
+      while (opps.length < GAMES_PER_INDIVIDUAL) {
+        const j = Math.floor(Math.random() * POP_SIZE);
+        if (j !== i && !opps.includes(j)) opps.push(j);
+      }
+      for (const j of opps) {
+        const blackFirst = Math.random() < 0.5;
+        const [b, w] = blackFirst ? [pop[i], pop[j]] : [pop[j], pop[i]];
+        totalPlies += playGame(b, w);
+      }
+    }
+    return totalPlies;
+  }
+
+  btn.addEventListener("click", () => {
+    btn.disabled = true;
+    out.textContent = "";
+    log("Initializing population (pop=6)…");
+    const pop = [];
+    for (let i = 0; i < POP_SIZE; i++) {
+      pop.push(makeIndividual(N.newRandomWeights(0.05), N.newSigmas(0.05)));
+    }
+
+    // Yield one frame so the button disabled state paints, then run.
+    requestAnimationFrame(() => {
+      log("Warmup gen (JIT)…");
+      const wt0 = performance.now();
+      runOneGen(pop);
+      const wtdt = performance.now() - wt0;
+      log(`  warmup: ${wtdt.toFixed(0)} ms`);
+
+      log("\nTiming 5 gens…");
+      const NGENS = 5;
+      let totalPlies = 0;
+      const t0 = performance.now();
+      for (let g = 0; g < NGENS; g++) totalPlies += runOneGen(pop);
+      const dt = performance.now() - t0;
+
+      log(`${NGENS} gens in ${dt.toFixed(0)} ms`);
+      log(`  ${(dt / NGENS).toFixed(0)} ms/gen`);
+      log(`  ${(2000 / (dt / NGENS)).toFixed(1)} gens per 2 s`);
+      log(`  avg ${(totalPlies / (NGENS * POP_SIZE * GAMES_PER_INDIVIDUAL)).toFixed(1)} plies/game`);
+
+      log("\nReference points:");
+      log("  Node bench (same JS):     ~200 ms/gen");
+      log("  Your browser Worker:      ~480 ms/gen");
+      log(`  Chrome main-thread here:  ${(dt / NGENS).toFixed(0)} ms/gen`);
+      log("");
+      log("Interpretation:");
+      log("  main ≈ Node      → Worker context is the bottleneck (fixable)");
+      log("  main ≈ Worker    → Chrome V8 is slower than Node V8 on this box");
+      log("                     (largely outside our code's reach)");
+
+      btn.disabled = false;
+    });
+  });
+})();
+</script>
+</body>
+</html>

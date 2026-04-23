@@ -22,7 +22,7 @@
  * (pause/snapshot requests) between gens.
  */
 
-importScripts("checkers.js?v=5", "network.js?v=5", "minimax.js?v=5");
+importScripts("checkers.js?v=6", "network.js?v=6", "minimax.js?v=6");
 
 const C = self.Checkers;
 const N = self.Network;
@@ -277,11 +277,13 @@ function topSnapshot() {
 // first gen of a burst, then once per SAMPLE_EVERY_N gens.
 const SAMPLE_EVERY_N = 3;
 
-// Run GENS_PER_BATCH gens per setTimeout cycle. Cuts scheduler + postMessage
-// overhead and reduces main-thread wake-ups that can contend for CPU on a
-// shared-core box. Trade-off: pause requests from main only take effect at
-// batch boundaries, so max pause latency = GENS_PER_BATCH × ms/gen.
-const GENS_PER_BATCH = 2;
+// Run gens in a time-budgeted batch. V8 in Workers tier-ups JIT less
+// aggressively when the code is chopped into short setTimeout(0) chunks —
+// a main-thread bench that ran 5 gens in one uninterrupted block hit
+// 286 ms/gen on the same hardware, while a Worker yielding every 2 gens sat
+// at 480 ms/gen. Longer hot loops = better tier-up. BATCH_BUDGET_MS caps
+// pause-latency at roughly (budget + one-gen-time) after a pause message.
+const BATCH_BUDGET_MS = 200;
 
 function perfNow() {
   return (typeof performance !== "undefined") ? performance.now() : Date.now();
@@ -291,14 +293,16 @@ function scheduleNext() {
   if (!running) { nextTask = null; return; }
   nextTask = setTimeout(() => {
     try {
+      const budgetStart = perfNow();
       let batchMs = 0;
       let batched = 0;
-      for (let b = 0; b < GENS_PER_BATCH && running; b++) {
+      do {
         const t0 = perfNow();
         runOneGen();
-        batchMs += perfNow() - t0;
+        const took = perfNow() - t0;
+        batchMs += took;
         batched++;
-      }
+      } while (running && (perfNow() - budgetStart) < BATCH_BUDGET_MS);
       const genMs = batched > 0 ? (batchMs / batched) : 0;
 
       // Decide whether this gen's message carries the replay samples. If so,
