@@ -165,9 +165,10 @@
 
         // Square-level highlight (drawn behind the piece) for the moved-to
         // square — gives a glow under the piece even when the piece itself
-        // is small.
+        // is small. Uses blue (not the board's yellow accent) so it doesn't
+        // collide with the king-crown ring or the white piece edges.
         if (sq === highlightSq) {
-          ctx.fillStyle = COLOR.hlTo;
+          ctx.fillStyle = "rgba(80, 160, 255, 0.55)";
           ctx.fillRect(x, y, cell, cell);
         }
 
@@ -196,12 +197,13 @@
           ctx.lineWidth = 1.5;
           ctx.stroke();
         }
-        // Bright ring around the just-moved piece, drawn last so it sits
-        // on top of the piece outline.
+        // Bright blue ring around the just-moved piece, drawn last so it
+        // sits on top of the piece outline. Blue keeps it visually distinct
+        // from the yellow king-crown and the white piece edge.
         if (sq === highlightSq) {
           ctx.beginPath();
           ctx.arc(cx, cy, pr + 2, 0, Math.PI * 2);
-          ctx.strokeStyle = COLOR.kingCrown;  // bright accent yellow
+          ctx.strokeStyle = "#4aa0ff";
           ctx.lineWidth = 2.5;
           ctx.stroke();
         }
