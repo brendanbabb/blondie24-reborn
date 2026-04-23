@@ -147,11 +147,14 @@
   //   (matches the live-evolve demo's mini-replay panel). The play-strong
   //   AI's-plan strip passes a smaller value so pieces don't crowd the cell
   //   at the smaller mini-board scale.
+  // opts.pieceEdgeWidth: stroke width of the per-piece outline. Defaults
+  //   to 1.8; play-strong passes a thinner value for a more refined look.
   function drawMini(ctx, squares, opts) {
     opts = opts || {};
     const canvasSize = opts.size != null ? opts.size : 200;
     const highlightSq = opts.highlightSq != null ? opts.highlightSq : -1;
     const pieceScale = opts.pieceScale != null ? opts.pieceScale : 0.38;
+    const pieceEdgeWidth = opts.pieceEdgeWidth != null ? opts.pieceEdgeWidth : 1.8;
     const cell = canvasSize / 8;
     const pr = cell * pieceScale;
 
@@ -193,7 +196,7 @@
         ctx.fillStyle = isBlack ? COLOR.blackPiece : COLOR.whitePiece;
         ctx.fill();
         ctx.strokeStyle = isBlack ? "#f0f0f0" : "#1a1410";
-        ctx.lineWidth = 1.8;
+        ctx.lineWidth = pieceEdgeWidth;
         ctx.stroke();
         if (isKing) {
           ctx.beginPath();

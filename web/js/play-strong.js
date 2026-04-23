@@ -467,11 +467,13 @@
       // highlightSq draws a blue ring around the piece that just moved
       // — makes the move visible at the small mini-board scale. pieceScale
       // is shrunk from the default 0.38 so pieces don't crowd the cell at
-      // 72px boards.
+      // 72px boards. Edge width also dialed down so the outline reads as
+      // a refined detail rather than dominating the small piece.
       R.drawMini(cvCtx, board.squares, {
         size: PLAN_BOARD_PX,
         highlightSq: movedTo,
         pieceScale: 0.30,
+        pieceEdgeWidth: 1.1,
       });
       cell.appendChild(cv);
 
