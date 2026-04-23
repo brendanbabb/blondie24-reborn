@@ -22,6 +22,11 @@
   const AI_DEPTH = 6;
   const MIN_SEARCH_PAD_MS = 200;       // UX pad so fast endgames don't snap-move
   const THINKING_YIELD_MS = 20;        // paint the "AI is thinking…" banner before blocking
+  const PLAN_PLIES = 6;                // # of mini-boards in the AI's-plan strip
+  const PLAN_BOARD_PX = 72;            // each mini-board canvas size
+  const PLAN_REVEAL_MS = 90;           // delay between progressive reveals
+  const EVAL_COLOR_POS = "#20c060";    // bright green: AI sees you ahead
+  const EVAL_COLOR_NEG = "#e03030";    // bright red: AI sees itself ahead
 
   // Opponent slots. Each entry is one weights bin + sidecar meta. Adding a
   // third slot is just appending another object here and shipping the files.
@@ -377,6 +382,11 @@
       state.aiThinkMs += searchMs;
       state.aiMoveCount += 1;
       updateThinkDisplay();
+      updateSearchEffort(result);
+      // Render the AI's predicted line into the mini-board strip. This is
+      // the planning view — done before commit so the user sees what the
+      // AI thought *would* happen vs. what actually plays out.
+      renderAiPlan(state.board, result.pv || []);
       const pad = Math.max(0, MIN_SEARCH_PAD_MS - searchMs);
       setTimeout(() => {
         state.aiThinking = false;
@@ -389,6 +399,103 @@
         commitMove(result.move, "AI");
       }, pad);
     }, THINKING_YIELD_MS);
+  }
+
+  // ---- Search-effort stat ----
+  function updateSearchEffort(result) {
+    const el = document.getElementById("search-effort");
+    if (!el) return;
+    if (!result || result.nodesEvaluated == null) {
+      el.textContent = "—";
+      return;
+    }
+    const ev = result.nodesEvaluated;
+    const pr = result.nodesPruned;
+    el.textContent =
+      ev.toLocaleString() + " evals · " + pr.toLocaleString() + " α-β cuts";
+  }
+
+  // ---- AI's plan (principal variation) mini-board strip ----
+  function renderAiPlan(rootBoard, pv) {
+    const row = document.getElementById("plan-row");
+    if (!row) return;
+    row.innerHTML = "";
+
+    if (!pv || pv.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "plan-empty";
+      empty.textContent = "(no predicted line — search returned no PV)";
+      row.appendChild(empty);
+      return;
+    }
+
+    // Walk the line, rendering one mini-board per ply. Score is the network's
+    // raw eval at each successor position, shown from that side's perspective.
+    let board = C.cloneBoard(rootBoard);
+    const cells = [];
+    const limit = Math.min(PLAN_PLIES, pv.length);
+
+    for (let i = 0; i < limit; i++) {
+      const move = pv[i];
+      // Side that's ABOUT to move at this snapshot (the one playing this ply).
+      const mover = board.currentPlayer;
+      const aiSide = -humanSide();
+      const actorLabel = (mover === aiSide) ? "AI" : "You";
+
+      board = C.applyMove(board, move);
+      const evalRaw = state.aiNet ? state.aiNet.forward(board) : 0;
+      // After the move, currentPlayer flipped. The eval is from the *new*
+      // side-to-move's perspective. Display from the mover's perspective so
+      // the sign tells a consistent story ("the side that just moved sees X").
+      const fromMover = -evalRaw;
+
+      const cell = document.createElement("div");
+      cell.className = "plan-cell";
+
+      const plyNum = document.createElement("div");
+      plyNum.className = "ply-num";
+      plyNum.textContent = "ply " + (i + 1);
+      cell.appendChild(plyNum);
+
+      const cv = document.createElement("canvas");
+      cv.width = PLAN_BOARD_PX;
+      cv.height = PLAN_BOARD_PX;
+      const cvCtx = cv.getContext("2d");
+      R.drawMini(cvCtx, board.squares, { size: PLAN_BOARD_PX });
+      cell.appendChild(cv);
+
+      const actor = document.createElement("div");
+      actor.className = "ply-actor";
+      actor.textContent = actorLabel + " plays";
+      cell.appendChild(actor);
+
+      const score = document.createElement("div");
+      score.className = "ply-score";
+      score.textContent =
+        (fromMover >= 0 ? "+" : "") + fromMover.toFixed(2);
+      cell.appendChild(score);
+
+      row.appendChild(cell);
+      cells.push(cell);
+    }
+
+    // Progressive reveal: each cell pops in PLAN_REVEAL_MS later than the
+    // previous one. Total animation time is PLAN_REVEAL_MS × N ≈ 540 ms for
+    // a depth-6 line, which feels like the AI is "thinking forward" without
+    // dragging out the actual move.
+    cells.forEach((cell, i) => {
+      setTimeout(() => cell.classList.add("show"), i * PLAN_REVEAL_MS);
+    });
+  }
+
+  function clearAiPlan() {
+    const row = document.getElementById("plan-row");
+    if (!row) return;
+    row.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "plan-empty";
+    empty.textContent = "(plan appears after the AI's first move)";
+    row.appendChild(empty);
   }
 
   // ---- Side-panel updates ----
@@ -424,8 +531,22 @@
       ? fromCurrent
       : -fromCurrent;
     const pct = Math.max(-1, Math.min(1, fromHuman));
-    const fill = ((pct + 1) / 2) * 100;
-    document.getElementById("eval-bar-fill").style.width = fill + "%";
+
+    // Fill grows from the center (50% mark) outward to the eval position,
+    // colored vividly by sign so the direction is unmistakable.
+    const fill = document.getElementById("eval-bar-fill");
+    const half = Math.abs(pct) * 50;        // % width on the appropriate side
+    if (pct >= 0) {
+      fill.style.left  = "50%";
+      fill.style.width = half + "%";
+      fill.style.background = EVAL_COLOR_POS;
+      fill.style.color = EVAL_COLOR_POS;    // drives the box-shadow glow
+    } else {
+      fill.style.left  = (50 - half) + "%";
+      fill.style.width = half + "%";
+      fill.style.background = EVAL_COLOR_NEG;
+      fill.style.color = EVAL_COLOR_NEG;
+    }
     document.getElementById("eval-number").textContent =
       (pct >= 0 ? "+" : "") + pct.toFixed(3);
     let verdict;
@@ -524,6 +645,8 @@
     updatePieceCounts();
     updatePosEval();
     updateButtons();
+    clearAiPlan();
+    updateSearchEffort(null);
 
     if (state.gameActive) maybeStartAiTurn();
   }

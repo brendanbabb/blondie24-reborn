@@ -130,11 +130,19 @@
     return sorted;
   }
 
+  // Per-search counters; reset at the start of every pickMove. Exposed so
+  // callers (the play-strong UI) can show "search effort" stats.
+  const searchStats = { evaluated: 0, pruned: 0 };
+
   function pickMove(board, depth, network) {
     const raw = C.getLegalMoves(board);
-    if (raw.length === 0) return { move: null, score: -WIN };
+    if (raw.length === 0) {
+      return { move: null, score: -WIN, pv: [], nodesEvaluated: 0, nodesPruned: 0 };
+    }
 
     ttBumpGen();
+    searchStats.evaluated = 0;
+    searchStats.pruned = 0;
 
     let bestMove = raw[0];
     let bestScore = -Infinity;
@@ -149,7 +157,40 @@
       bestScore = r.score;
     }
 
-    return { move: bestMove, score: bestScore };
+    // Walk the TT from root to extract the AI's predicted line (principal
+    // variation). The TT is still keyed by the current generation, so root
+    // and one-ply-down entries from the deepest ID iteration are still
+    // probe-able. Stops short if a probe misses or no move matches the
+    // (from, to) hint (rare; can happen if a multi-jump's TT key was
+    // overwritten by a sibling search).
+    const pv = extractPv(board, depth);
+
+    return {
+      move: bestMove,
+      score: bestScore,
+      pv: pv,
+      nodesEvaluated: searchStats.evaluated,
+      nodesPruned: searchStats.pruned,
+    };
+  }
+
+  function extractPv(rootBoard, maxLen) {
+    const pv = [];
+    let board = C.cloneBoard(rootBoard);
+    for (let i = 0; i < maxLen; i++) {
+      const probe = ttProbe(hashBoard(board));
+      if (!probe) break;
+      if (probe.bestFrom < 0) break;
+      const moves = C.getLegalMoves(board);
+      if (moves.length === 0) break;
+      const m = moves.find(mv =>
+        mv[0] === probe.bestFrom && mv[mv.length - 1] === probe.bestTo
+      );
+      if (!m) break;
+      pv.push(m);
+      board = C.applyMove(board, m);
+    }
+    return pv;
   }
 
   function rootSearch(board, depth, network, rawMoves) {
@@ -204,7 +245,10 @@
       // Subtract depth so "mate in 1" is preferred over "mate in 3".
       return -WIN + (100 - depth);
     }
-    if (depth === 0) return network.forward(board);
+    if (depth === 0) {
+      searchStats.evaluated++;
+      return network.forward(board);
+    }
 
     const moves = orderMoves(rawMoves, hintFrom, hintTo);
     let best = -Infinity;
@@ -222,7 +266,13 @@
         bestTo = m[m.length - 1];
       }
       if (best > alpha) alpha = best;
-      if (alpha >= beta) break;
+      if (alpha >= beta) {
+        // Beta cutoff — every remaining sibling move is now guaranteed
+        // worse than what we've already found. Counted once per cutoff
+        // (not per pruned move) so the stat reads as "subtrees skipped".
+        searchStats.pruned++;
+        break;
+      }
     }
 
     let flag;
