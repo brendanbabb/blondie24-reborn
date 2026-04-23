@@ -2,8 +2,9 @@
  * play-strong.js
  *
  * The "play the fully evolved champion" page. Loads a frozen Anaconda
- * network from web/weights/anaconda.bin on startup and plays the human
- * via minimax — no training, no worker, no evolution panels.
+ * network from web/weights/anaconda-<slot>.bin on startup (default slot
+ * is "paper-strict"; user can switch via the opponent dropdown) and plays
+ * the human via minimax — no training, no worker, no evolution panels.
  *
  * Deliberately shares as little as possible with the live-evolve demo's
  * main.js so the two pages can evolve independently. Reuses only the
@@ -22,8 +23,28 @@
   const MIN_SEARCH_PAD_MS = 200;       // UX pad so fast endgames don't snap-move
   const THINKING_YIELD_MS = 20;        // paint the "AI is thinking…" banner before blocking
 
-  const WEIGHTS_URL = "weights/anaconda.bin?v=6";
-  const META_URL    = "weights/anaconda.meta.json?v=6";
+  // Opponent slots. Each entry is one weights bin + sidecar meta. Adding a
+  // third slot is just appending another object here and shipping the files.
+  const OPPONENTS = [
+    {
+      id: "paper-strict",
+      label: "Paper-strict",
+      weightsUrl: "weights/anaconda-paper-strict.bin?v=7",
+      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=7",
+      available:  true,
+    },
+    {
+      id: "enhanced",
+      label: "Enhanced (not trained yet)",
+      weightsUrl: "weights/anaconda-enhanced.bin?v=7",
+      metaUrl:    "weights/anaconda-enhanced.meta.json?v=7",
+      available:  false,  // flip to true once the .bin is exported
+    },
+  ];
+  const DEFAULT_OPPONENT_ID = "paper-strict";
+  function opponentById(id) {
+    return OPPONENTS.find(o => o.id === id) || OPPONENTS[0];
+  }
 
   // ---- DOM refs ----
   const canvas        = document.getElementById("board");
@@ -48,8 +69,9 @@
     stateCounts: Object.create(null),
     finished: false,
     humanColor: "white",
-    aiNet: null,                 // filled once anaconda.bin loads
+    aiNet: null,                 // filled once the selected slot's bin loads
     netReady: false,
+    currentOpponentId: DEFAULT_OPPONENT_ID,
     aiThinking: false,
     aiMoveCount: 0,
     aiThinkMs: 0,                // cumulative search time
@@ -71,13 +93,29 @@
   }
 
   // ---- Load weights + metadata ----
-  async function loadOpponent() {
+  async function loadOpponent(opponentId) {
+    const opp = opponentById(opponentId || state.currentOpponentId);
+    state.currentOpponentId = opp.id;
+    state.netReady = false;
+    state.aiNet = null;
+    updateButtons();
+
+    if (!opp.available) {
+      document.getElementById("weights-label").textContent = "—";
+      document.getElementById("training-label").textContent = "not trained yet";
+      showBanner("",
+        `"${opp.label.replace(/ \(.*\)$/, '')}" weights aren't available yet. ` +
+        `Pick a different opponent from the dropdown.`
+      );
+      return;
+    }
+
     document.getElementById("weights-label").textContent = "loading…";
     document.getElementById("training-label").textContent = "loading…";
     try {
       const [weights, metaResp] = await Promise.all([
-        A.loadWeightsFromUrl(WEIGHTS_URL),
-        fetch(META_URL).then(r => r.ok ? r.json() : null).catch(() => null),
+        A.loadWeightsFromUrl(opp.weightsUrl),
+        fetch(opp.metaUrl).then(r => r.ok ? r.json() : null).catch(() => null),
       ]);
       state.aiNet = A.makeNetwork(weights);
       state.netReady = true;
@@ -93,10 +131,13 @@
             "pipeline stub, not the real Anaconda opponent. See README for " +
             "the training command."
           );
+        } else {
+          showBanner(null, null);
         }
       } else {
         document.getElementById("training-label").textContent = "(no metadata)";
       }
+      updateButtons();
       render();
     } catch (err) {
       console.error(err);
@@ -494,7 +535,22 @@
   resignBtn.addEventListener("click", onResign);
   humanColorSel.addEventListener("change", () => resetGame(false));
 
+  // Populate opponent dropdown.
+  const opponentSel = document.getElementById("opponent-select");
+  for (const opp of OPPONENTS) {
+    const opt = document.createElement("option");
+    opt.value = opp.id;
+    opt.textContent = opp.label;
+    if (!opp.available) opt.disabled = true;
+    opponentSel.appendChild(opt);
+  }
+  opponentSel.value = DEFAULT_OPPONENT_ID;
+  opponentSel.addEventListener("change", () => {
+    loadOpponent(opponentSel.value);
+    resetGame(false);
+  });
+
   // Boot.
   resetGame(false);
-  loadOpponent();
+  loadOpponent(DEFAULT_OPPONENT_ID);
 })();

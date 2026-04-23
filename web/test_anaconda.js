@@ -1,7 +1,7 @@
 // Verifies the JS Anaconda port matches Python's AnacondaNet on the same
 // weights and the same fixed boards. Requires:
-//   web/weights/anaconda.bin         (5048 little-endian float32)
-//   web/weights/anaconda-fixtures.json
+//   web/weights/anaconda-paper-strict.bin         (5048 little-endian float32)
+//   web/weights/anaconda-paper-strict-fixtures.json
 // Run with: node web/test_anaconda.js
 const vm = require('vm');
 const fs = require('fs');
@@ -28,7 +28,7 @@ const A = ctx.AnacondaNetwork;
 const M = ctx.Minimax;
 
 // Load weights.bin
-const binPath = path.join(W_DIR, 'anaconda.bin');
+const binPath = path.join(W_DIR, 'anaconda-paper-strict.bin');
 const buf = fs.readFileSync(binPath);
 const expected = A.N_WEIGHTS * 4;
 if (buf.byteLength !== expected) {
@@ -45,7 +45,7 @@ console.log(`loaded ${weights.length} weights from ${path.relative(process.cwd()
 const net = A.makeNetwork(weights);
 
 // Load fixtures.json
-const fixPath = path.join(W_DIR, 'anaconda-fixtures.json');
+const fixPath = path.join(W_DIR, 'anaconda-paper-strict-fixtures.json');
 const fixData = JSON.parse(fs.readFileSync(fixPath, 'utf8'));
 if (fixData.arch !== '2001') {
   console.error(`FAIL: fixtures arch=${fixData.arch}, expected 2001`);

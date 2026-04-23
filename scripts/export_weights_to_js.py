@@ -15,8 +15,8 @@ Usage:
 
     # If you don't have a trained checkpoint yet and just want the pipeline
     # end-to-end:
-    python scripts/export_weights_to_js.py --init-random 2001 web/weights/anaconda.bin
-        --fixtures web/weights/anaconda-fixtures.json
+    python scripts/export_weights_to_js.py --init-random 2001 web/weights/anaconda-paper-strict.bin
+        --fixtures web/weights/anaconda-paper-strict-fixtures.json
 """
 
 import argparse

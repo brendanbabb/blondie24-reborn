@@ -23,7 +23,7 @@
  *   [5047]            king_weight
  *
  * This is the exact layout emitted by scripts/export_weights_to_js.py
- * and consumed from web/weights/anaconda.bin (little-endian float32).
+ * and consumed from web/weights/anaconda-*.bin (little-endian float32).
  *
  * The 91 windows are enumerated deterministically at module load using the
  * same order as neural/anaconda_windows.py:

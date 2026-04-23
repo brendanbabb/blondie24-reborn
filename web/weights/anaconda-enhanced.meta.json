@@ -1,0 +1,8 @@
+{
+  "source": "not trained yet",
+  "architecture": "Anaconda (2001)",
+  "arch_key": "2001",
+  "nWeights": 5048,
+  "generations": null,
+  "note": "Slot reserved for the second training run (paper-2001 with asymmetric win-favoring scoring, quiescence on, depth-schedule curriculum). Not yet trained — the dropdown disables this option until the .bin is exported."
+}

@@ -28,11 +28,12 @@ demo code deliberately has no build step, no dependencies, and no network calls.
 
 [`web/play-strong.html`](./web/play-strong.html) is a second browser page that plays against
 a **frozen, pre-trained** 2001 Anaconda network (5,048 weights, 91 sub-board filters +
-92→40→10→1 MLP) loaded from `web/weights/anaconda.bin`. Unlike the live-evolve page, no
+92→40→10→1 MLP) loaded from `web/weights/anaconda-paper-strict.bin` (or the Enhanced slot,
+if you've trained one — picker in the page header). Unlike the live-evolve page, no
 training happens while you play — it's the finished product of an offline training run. The AI
 searches at depth 6 on every move. Pure static — same GitHub Pages deployment, no extra setup.
 
-The page ships with a random-init placeholder `anaconda.bin` so the pipeline is testable out
+The page ships with a random-init placeholder `anaconda-paper-strict.bin` so the pipeline is testable out
 of the box; to get the real expert-level opponent the paper describes, train locally and
 overwrite the bin (instructions in the [training section below](#training-the-anaconda-opponent)).
 
@@ -164,27 +165,56 @@ costs only about 7 extra minutes per 850 generations.
 
 ### Training the Anaconda opponent
 
-The [companion browser page](#companion-page-play-the-fully-evolved-anaconda) loads a frozen
-Anaconda network from `web/weights/anaconda.bin`. The repo ships a random-init placeholder
-there so the page works out of the box. To replace it with a real trained opponent:
+The [companion browser page](#companion-page-play-the-fully-evolved-anaconda) has two
+opponent slots, picked from a dropdown:
+
+- **Paper-strict** — `web/weights/anaconda-paper-strict.bin`. The strict paper-faithful
+  training: `paper-2001-strict` preset, (μ+μ), no quiescence, symmetric σ evolution.
+- **Enhanced** — `web/weights/anaconda-enhanced.bin`. A second run with non-paper tweaks
+  (asymmetric win-favoring scoring, quiescence on, optional depth-schedule curriculum)
+  intended to break out of the paper-strict draw plateau.
+
+The repo ships a random-init placeholder for paper-strict so the page works out of the box.
+The enhanced slot ships empty (meta.json only, dropdown option disabled) until you train it.
+
+To replace the paper-strict placeholder with a real trained opponent:
 
 ```bash
 # Step 1: train. ~47 min on a 24-core box for 850 generations at strict paper fidelity.
-python -m training.train --preset paper-2001-strict --generations 850 --workers 20
+# Always pass --device cpu; auto-detect picks CUDA at depth>=4 which disables the worker
+# pool and runs serially (200x slower per gen).
+python -m training.train --preset paper-2001-strict --generations 850 \
+    --workers 20 --device cpu
 
 # Step 2: export the champion's flat weight vector to the browser demo's bin file.
-python scripts/export_weights_to_js.py checkpoints/best_gen0850.pt web/weights/anaconda.bin
+python scripts/export_weights_to_js.py checkpoints/best_gen0850.pt \
+    web/weights/anaconda-paper-strict.bin \
+    --fixtures web/weights/anaconda-paper-strict-fixtures.json
 ```
 
-That writes both `web/weights/anaconda.bin` (5,048 × float32 = ~20 KB) and a sidecar
-`anaconda.meta.json` with provenance (checkpoint name, gen count) that the play-strong page
-displays. Commit both and the GitHub-Pages-deployed opponent updates automatically.
+To train and slot the enhanced opponent:
+
+```bash
+python -m training.train --preset paper-2001 --generations 2000 \
+    --win-score 2.0 --loss-score -1.0 \
+    --depth-schedule 0:3,20:4,80:5,200:6 \
+    --max-sigma 0.5 \
+    --workers 20 --device cpu
+
+python scripts/export_weights_to_js.py checkpoints/best_gen2000.pt \
+    web/weights/anaconda-enhanced.bin \
+    --fixtures web/weights/anaconda-enhanced-fixtures.json
+
+# Then flip `available: true` for the "enhanced" entry in web/js/play-strong.js.
+```
+
+Each export writes both the `.bin` (5,048 × float32 = ~20 KB) and a sidecar `.meta.json`
+with provenance (checkpoint name, gen count) that the play-strong page displays. Commit
+both and the GitHub-Pages-deployed opponent updates automatically.
 
 Verify the JS port still matches the new weights with:
 
 ```bash
-python scripts/export_weights_to_js.py checkpoints/best_gen0850.pt web/weights/anaconda.bin \
-    --fixtures web/weights/anaconda-fixtures.json
 node web/test_anaconda.js
 ```
 
