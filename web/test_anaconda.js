@@ -1,8 +1,8 @@
 // Verifies the JS Anaconda port matches Python's AnacondaNet on the same
 // weights and the same fixed boards. Requires:
-//   docs/weights/anaconda.bin         (5048 little-endian float32)
-//   docs/weights/anaconda-fixtures.json
-// Run with: node docs/test_anaconda.js
+//   web/weights/anaconda.bin         (5048 little-endian float32)
+//   web/weights/anaconda-fixtures.json
+// Run with: node web/test_anaconda.js
 const vm = require('vm');
 const fs = require('fs');
 const path = require('path');

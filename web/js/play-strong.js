@@ -2,7 +2,7 @@
  * play-strong.js
  *
  * The "play the fully evolved champion" page. Loads a frozen Anaconda
- * network from docs/weights/anaconda.bin on startup and plays the human
+ * network from web/weights/anaconda.bin on startup and plays the human
  * via minimax — no training, no worker, no evolution panels.
  *
  * Deliberately shares as little as possible with the live-evolve demo's

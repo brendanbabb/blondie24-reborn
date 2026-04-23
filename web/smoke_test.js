@@ -1,7 +1,7 @@
 // Node-side smoke test for the browser demo's checkers + minimax + network
-// modules. Run with: node docs/smoke_test.js
+// modules. Run with: node web/smoke_test.js
 //
-// Loads the actual docs/js/*.js files into a fresh vm context, then exercises:
+// Loads the actual web/js/*.js files into a fresh vm context, then exercises:
 //   1) basic engine: starting moves count
 //   2) make/unmake round-trips against the pure applyMove
 //   3) deeper random-walk consistency: apply N moves in place, undo them

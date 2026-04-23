@@ -4,19 +4,34 @@ A self-contained, build-free static site that re-implements Chellapilla & Fogel'
 evolutionary-checkers architecture in vanilla JavaScript. The AI trains for ~2 seconds of
 self-play on every AI turn, then picks its move with the freshly-evolved champion.
 
-Serve locally:
+## Relationship to the Python codebase (containment rules)
+
+This `web/` tree is treated as **independent code** from the Python training stack
+(`checkers/ evolution/ neural/ search/ training/`). The evolve-as-it-plays page
+(`index.html` + `js/main.js` + `js/worker.js` + `js/network.js` + `js/minimax.js` +
+`js/checkers.js`) does its own in-browser EP loop — it is **not** expected to stay
+bit-compatible with the Python engine, and changes on either side do not need to be
+mirrored.
+
+The **one** deliberate bridge is the frozen-opponent page (`play-strong.html`):
+`js/anaconda-network.js` is a bit-exact port of `neural/anaconda_network.py` (inference
+only) so it can faithfully play weights trained offline in Python. That parity is
+guarded by `node web/test_anaconda.js` (|Δ| < 1e-6 on five fixed positions). Touch
+either side of that port and run the test.
+
+## Serve locally
 
 ```bash
-cd docs && python -m http.server --bind 127.0.0.1 8765
+cd web && python -m http.server --bind 127.0.0.1 8765
 # open http://localhost:8765/
 ```
 
-For GitHub Pages: repo Settings → Pages → Source = `main` / `/docs`.
+For GitHub Pages: repo Settings → Pages → Source = `main` / `/web`.
 
 ## File layout
 
 ```
-docs/
+web/
 ├── index.html              single-page layout + inline "What am I looking at?" explainer
 ├── css/style.css           dark theme, 3-col grid, mobile fallback at <=900px and <=520px
 ├── js/checkers.js          32-square engine (legal moves, multi-jumps, king promotion,
@@ -64,7 +79,7 @@ main thread's snapshot promise has an 8-second timeout to absorb that.
 
 ## Key constants you might want to tweak
 
-In `docs/js/worker.js`:
+In `web/js/worker.js`:
 
 ```js
 POP_SIZE             = 6     // networks per generation
@@ -76,7 +91,7 @@ DRAW_SCORE =  0.0
 LOSS_SCORE = -2.0            // paper's asymmetric loss penalty
 ```
 
-In `docs/js/main.js`:
+In `web/js/main.js`:
 
 ```js
 AI_DEPTH            = 4     // depth for the move the AI plays against you
