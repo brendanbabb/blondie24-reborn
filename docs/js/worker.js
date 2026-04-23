@@ -138,36 +138,24 @@ function runOneGen() {
     }
   }
 
-  // Pick two distinct pairings to record for the replay panel (Game A and
-  // Game B). If there are somehow fewer than 2 pairings, sampleIdxB stays
-  // -1 and nothing is recorded for B.
-  const sampleIdxA = Math.floor(Math.random() * pairings.length);
-  let sampleIdxB = -1;
-  if (pairings.length > 1) {
-    do {
-      sampleIdxB = Math.floor(Math.random() * pairings.length);
-    } while (sampleIdxB === sampleIdxA);
-  }
-  let sampleGameA = null;
-  let sampleGameB = null;
+  // Record frames for every game (~2.5KB/game × 18 games ≈ 45KB/gen — trivial
+  // vs. the Int8Array allocations inside minimax). After all games run, we
+  // pick 2 for the replay panel, preferring DECISIVE games (winner != 0) so
+  // the user sees actual checkmates instead of shuffle-draws.
+  const allRecordings = [];
 
   for (let pi = 0; pi < pairings.length; pi++) {
     const p = pairings[pi];
-    const shouldRecord = pi === sampleIdxA || pi === sampleIdxB;
     const black = p.aIsBlack ? population[p.a] : population[p.b];
     const white = p.aIsBlack ? population[p.b] : population[p.a];
-    const result = playGame(black, white, shouldRecord);
+    const result = playGame(black, white, true);
     const winner = result.winner;
-    if (shouldRecord) {
-      const recorded = {
-        frames: result.frames,
-        blackIdx: p.aIsBlack ? p.a : p.b,
-        whiteIdx: p.aIsBlack ? p.b : p.a,
-        winner: winner,
-      };
-      if (pi === sampleIdxA) sampleGameA = recorded;
-      else sampleGameB = recorded;
-    }
+    allRecordings.push({
+      frames: result.frames,
+      blackIdx: p.aIsBlack ? p.a : p.b,
+      whiteIdx: p.aIsBlack ? p.b : p.a,
+      winner: winner,
+    });
 
     const playerA = population[p.a];
     const playerB = population[p.b];
@@ -187,9 +175,21 @@ function runOneGen() {
     }
   }
 
-  // Stash for the next gen event.
-  _lastSampleGameA = sampleGameA;
-  _lastSampleGameB = sampleGameB;
+  // Pick 2 games for the replay panel. Prefer decisive over draws; shuffle
+  // within the preferred tier so successive gens don't always pick the same
+  // pairings. If there aren't enough decisive games, fill from draws.
+  const decisive = allRecordings.filter(r => r.winner !== 0);
+  const draws = allRecordings.filter(r => r.winner === 0);
+  const pool = (decisive.length >= 2)
+    ? decisive
+    : decisive.concat(draws);  // fallback: use draws too when needed
+  // Fisher–Yates shuffle of the pool
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+  }
+  _lastSampleGameA = pool[0] || null;
+  _lastSampleGameB = pool[1] || null;
 
   // Capture the tournament standings BEFORE selection zeroes fitness.
   population.sort((x, y) => y.fitness - x.fitness);
