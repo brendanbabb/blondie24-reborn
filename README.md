@@ -9,9 +9,9 @@ and no backprop — trained entirely by self-play under an evolutionary strategy
 
 A GitHub-Pages-deployable demo lives under [`docs/`](./docs). It's a pure-static, vanilla-JS
 re-implementation of the 1999 architecture with a twist: the AI **evolves while you play it**.
-Every time the AI's turn arrives it runs ~1 second of self-play evolution in a Web Worker, then
+Every time the AI's turn arrives it runs ~3 seconds of self-play evolution in a Web Worker, then
 picks a move with the freshly-evolved champion network. Over a 30-move game the population runs
-through ~100–300 generations — a real slice of the paper's training curve, compressed into a
+through ~150–300 generations — a real slice of the paper's training curve, compressed into a
 single play session.
 
 No install. Just serve the folder:
