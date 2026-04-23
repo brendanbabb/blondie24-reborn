@@ -143,12 +143,17 @@
   //
   // opts.highlightSq: 0..31 to draw a vivid ring around that square (used by
   //   the AI's-plan strip to mark the piece that just moved); -1/undefined skips it.
+  // opts.pieceScale: piece radius as fraction of cell size. Defaults to 0.38
+  //   (matches the live-evolve demo's mini-replay panel). The play-strong
+  //   AI's-plan strip passes a smaller value so pieces don't crowd the cell
+  //   at the smaller mini-board scale.
   function drawMini(ctx, squares, opts) {
     opts = opts || {};
     const canvasSize = opts.size != null ? opts.size : 200;
     const highlightSq = opts.highlightSq != null ? opts.highlightSq : -1;
+    const pieceScale = opts.pieceScale != null ? opts.pieceScale : 0.38;
     const cell = canvasSize / 8;
-    const pr = cell * 0.38;
+    const pr = cell * pieceScale;
 
     ctx.clearRect(0, 0, canvasSize, canvasSize);
 

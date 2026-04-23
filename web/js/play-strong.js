@@ -464,11 +464,14 @@
       cv.width = PLAN_BOARD_PX;
       cv.height = PLAN_BOARD_PX;
       const cvCtx = cv.getContext("2d");
-      // highlightSq draws a yellow ring around the piece that just moved
-      // — makes the move visible at the small mini-board scale.
+      // highlightSq draws a blue ring around the piece that just moved
+      // — makes the move visible at the small mini-board scale. pieceScale
+      // is shrunk from the default 0.38 so pieces don't crowd the cell at
+      // 72px boards.
       R.drawMini(cvCtx, board.squares, {
         size: PLAN_BOARD_PX,
         highlightSq: movedTo,
+        pieceScale: 0.30,
       });
       cell.appendChild(cv);
 
