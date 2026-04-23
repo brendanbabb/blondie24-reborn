@@ -30,10 +30,11 @@ What you'll see:
   green legal-move dots and red capture-landing dots. Squares are labeled 1–32 (standard
   checkers notation). Forced captures surface a red banner above the board listing which of
   your pieces can jump.
-- **Controls row** (New game · Offer draw · Resign · color picker) sits right above the board.
-  The AI doesn't start training until you click **New game**, so you can pick your color first.
-  Offered draws are evaluated by the current champion network: if its own eval isn't > +0.30
-  it accepts.
+- **Controls row** (New game · Offer draw · Ask AI to resign · Resign · color picker) sits
+  right above the board. The AI doesn't start training until you click **New game**, so you
+  can pick your color first. Offered draws are evaluated by the current champion network: if
+  its own eval isn't > +0.30 it accepts. **Ask AI to resign** is the mirror: the AI concedes
+  only if its own-side eval is ≤ −0.65 (clearly losing); otherwise it plays on.
 - **Pieces panel** — large tabular-figures count of your remaining pieces vs. the AI's, kings
   tracked separately. Turns orange when either side drops to ≤3 pieces.
 - **Training stats** — generation counter, gens-this-turn delta, gens/sec, cumulative AI
@@ -69,13 +70,16 @@ Every AI turn, for ~2 seconds:
 Network weights — including the piece-difference bypass — are initialized from **N(0, σ)**
 with σ=0.05, exactly as in the paper. No hand-seeded "material bias" to bootstrap early play:
 gen-0 networks play chaotically and selection finds the useful weights on its own. After
-clicking New game the worker runs **2 warmup generations** before the first move so the AI
+clicking New game the worker runs **3 warmup generations** before the first move so the AI
 at least isn't literally random on move 1.
 
-At 2 seconds per AI turn at depth 4, the browser typically fits **2–6 generations** per turn.
-Across ~30 AI moves in a game, the population runs through **60–150 generations** total. The
-paper reached Class-A play at ~250 generations, so one casual play session covers the first
-half of the learning curve.
+At 2 seconds per AI turn at depth 4, the browser typically fits **6–10 generations** per turn
+(the JS search uses make/unmake, a per-search Zobrist transposition table, and iterative
+deepening with TT-move-first ordering — all correctness-preserving speed-ups; see
+[`docs/README.md`](./docs/README.md) for details). Across ~30 AI moves in a game, the
+population runs through **180–300 generations** total. The paper reached Class-A play at
+~250 generations, so one casual play session now covers roughly the full A-class learning
+curve.
 
 When the AI's 2 seconds are up, the current top-ranked network runs **depth-4 minimax** from
 the board you see and plays its move. Evolution pauses while you think, so the opponent you

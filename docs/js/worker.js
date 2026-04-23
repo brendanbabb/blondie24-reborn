@@ -22,7 +22,7 @@
  * (pause/snapshot requests) between gens.
  */
 
-importScripts("checkers.js", "network.js", "minimax.js");
+importScripts("checkers.js?v=5", "network.js?v=5", "minimax.js?v=5");
 
 const C = self.Checkers;
 const N = self.Network;
@@ -47,14 +47,27 @@ let generation = 0;
 let running = false;
 let nextTask = null;
 
+// Wrap weights in a Network wrapper ONCE per individual and reuse it across
+// every game that individual plays over its lifetime. Creating a fresh wrapper
+// per game (the old behavior) generates a new `forward` closure each time,
+// which blows V8's inline-cache at the minimax call site from polymorphic to
+// megamorphic and deoptimizes the forward path. In a node-side bench that
+// reused wrappers, gens ran 2-3× faster than a worker that didn't.
+function makeIndividual(weights, sigmas) {
+  return {
+    weights, sigmas,
+    net: N.makeNetwork(weights),
+    fitness: 0, wins: 0, losses: 0, draws: 0,
+  };
+}
+
 function initPopulation() {
   population = [];
   for (let i = 0; i < POP_SIZE; i++) {
-    population.push({
-      weights: N.newRandomWeights(0.1),
-      sigmas: N.newSigmas(0.05),
-      fitness: 0, wins: 0, losses: 0, draws: 0,
-    });
+    population.push(makeIndividual(
+      N.newRandomWeights(0.1),
+      N.newSigmas(0.05),
+    ));
   }
   generation = 0;
 }
@@ -88,8 +101,9 @@ function resetFitness() {
 // always captured here for the replay panel).
 function playGame(black, white, record) {
   let board = C.makeBoard();
-  const blackNet = N.makeNetwork(black.weights);
-  const whiteNet = N.makeNetwork(white.weights);
+  // Reuse each individual's pre-wrapped Network — see makeIndividual for why.
+  const blackNet = black.net;
+  const whiteNet = white.net;
   const stateCounts = Object.create(null);
   const frames = record ? [new Int8Array(board.squares)] : null;
 
@@ -218,22 +232,20 @@ function runOneGen() {
   }));
 
   // Selection: half-keep-mutate (matches the repo default). Keep top half,
-  // spawn that many offspring by mutating the survivors.
+  // spawn that many offspring by mutating the survivors. Survivors keep their
+  // existing weights and Network wrapper across generations (nothing mutates
+  // weights in place, so the old defensive Float32Array copy was pure waste).
   const survivors = population.slice(0, POP_SIZE / 2);
+  for (const s of survivors) {
+    s.fitness = 0; s.wins = 0; s.losses = 0; s.draws = 0;
+  }
   const offspring = [];
   for (let i = 0; i < POP_SIZE / 2; i++) {
     const parent = survivors[i % survivors.length];
     const m = N.mutate(parent.weights, parent.sigmas);
-    offspring.push({
-      weights: m.weights, sigmas: m.sigmas,
-      fitness: 0, wins: 0, losses: 0, draws: 0,
-    });
+    offspring.push(makeIndividual(m.weights, m.sigmas));
   }
-  population = survivors.map(s => ({
-    weights: new Float32Array(s.weights),
-    sigmas:  new Float32Array(s.sigmas),
-    fitness: 0, wins: 0, losses: 0, draws: 0,
-  })).concat(offspring);
+  population = survivors.concat(offspring);
 
   generation++;
 }
@@ -259,20 +271,67 @@ function topSnapshot() {
   };
 }
 
+// Replay samples only need to refresh every few gens — the mini-board takes
+// ~10 s to animate a whole game (220 ms per frame × ~44 frames), so streaming
+// a fresh 88-Int8Array payload every gen is pure waste. Cadence: send on the
+// first gen of a burst, then once per SAMPLE_EVERY_N gens.
+const SAMPLE_EVERY_N = 3;
+
+// Run GENS_PER_BATCH gens per setTimeout cycle. Cuts scheduler + postMessage
+// overhead and reduces main-thread wake-ups that can contend for CPU on a
+// shared-core box. Trade-off: pause requests from main only take effect at
+// batch boundaries, so max pause latency = GENS_PER_BATCH × ms/gen.
+const GENS_PER_BATCH = 2;
+
+function perfNow() {
+  return (typeof performance !== "undefined") ? performance.now() : Date.now();
+}
+
 function scheduleNext() {
   if (!running) { nextTask = null; return; }
   nextTask = setTimeout(() => {
     try {
-      runOneGen();
-      postMessage({
+      let batchMs = 0;
+      let batched = 0;
+      for (let b = 0; b < GENS_PER_BATCH && running; b++) {
+        const t0 = perfNow();
+        runOneGen();
+        batchMs += perfNow() - t0;
+        batched++;
+      }
+      const genMs = batched > 0 ? (batchMs / batched) : 0;
+
+      // Decide whether this gen's message carries the replay samples. If so,
+      // transfer their underlying ArrayBuffers instead of structured-cloning
+      // them — avoids a per-Int8Array deep copy on the worker→main boundary.
+      const sendSamples = (generation % SAMPLE_EVERY_N) === 0;
+      const msg = {
         type: "gen",
         gen: generation,
         leaderboard: leaderboardSnapshot(),
         meanFitness: population.reduce((s, x) => s + x.fitness, 0) / POP_SIZE,
         maxFitness: Math.max.apply(null, population.map(x => x.fitness)),
-        sampleGameA: _lastSampleGameA,
-        sampleGameB: _lastSampleGameB,
-      });
+        sampleGameA: sendSamples ? _lastSampleGameA : null,
+        sampleGameB: sendSamples ? _lastSampleGameB : null,
+        genMs: genMs,
+      };
+
+      const transfers = [];
+      if (sendSamples) {
+        if (_lastSampleGameA && _lastSampleGameA.frames) {
+          for (const f of _lastSampleGameA.frames) transfers.push(f.buffer);
+        }
+        if (_lastSampleGameB && _lastSampleGameB.frames) {
+          for (const f of _lastSampleGameB.frames) transfers.push(f.buffer);
+        }
+        // After transfer the worker's references are neutered — clear them
+        // so we don't accidentally re-transfer detached buffers next time.
+        _lastSampleGameA = null;
+        _lastSampleGameB = null;
+      }
+
+      if (transfers.length > 0) postMessage(msg, transfers);
+      else                      postMessage(msg);
     } catch (err) {
       // Surface the error to the main thread instead of silently hanging the
       // loop. Main can show the real cause in the status banner / console.

@@ -24,7 +24,9 @@ docs/
 ├── js/network.js           1,743-weight MLP (32 → 40 → 10 → 1 tanh) with piece-diff bypass,
 │                             evolvable king weight, fast Padé-tanh approximation,
 │                             Schwefel self-adaptive EP mutation
-├── js/minimax.js           negamax + alpha-beta, capture-first move ordering
+├── js/minimax.js           negamax + alpha-beta with make/unmake, a per-search Zobrist
+│                             transposition table, and iterative deepening + TT-move-first
+│                             ordering; capture-length move ordering as fallback
 ├── js/render.js            main board canvas renderer + mini-board (for the self-play replay)
 ├── js/worker.js            Web Worker: EP loop, pop=6, games-per-ind=3, adaptive training
 │                             depth (3 opening / 5 endgame), records all games each gen and
@@ -32,7 +34,8 @@ docs/
 └── js/main.js              UI glue: click-to-move, forced-jump enforcement, training panel,
                               live leaderboard (currently hidden), eval bar, self-play
                               replay, network-architecture viz, move history,
-                              Offer draw / Resign, 1-indexed square notation
+                              Offer draw / Ask AI to resign / Resign, 1-indexed
+                              square notation
 ```
 
 ## Worker message protocol
@@ -79,7 +82,7 @@ In `docs/js/main.js`:
 AI_DEPTH            = 4     // depth for the move the AI plays against you
 TRAIN_BURST_MS      = 2000  // how long the worker evolves between AI moves
 MIN_SEARCH_PAD_MS   = 200   // UX pad so the AI doesn't snap-move instantly
-PRETRAIN_GENS       = 2     // warmup gens run when you click New game
+PRETRAIN_GENS       = 3     // warmup gens run when you click New game
 MINI_STEP_MS        = 220   // ms per frame in the self-play replay animation
 MINI_END_HOLD_MS    = 1800  // pause on the winner banner before alternating
 ```
@@ -107,12 +110,13 @@ The demo deliberately stays close to Chellapilla & Fogel 1999:
 - **No network calls.** Everything runs client-side. You can serve over `file://` if your
   browser permits Web Workers from there (most don't, hence the `python -m http.server`
   line above).
-- **No transposition table or iterative deepening** in the JS minimax. The Python repo has
-  both; we didn't port them because at the demo's depth (3–5) the overhead of the
-  bookkeeping doesn't pay back. If you crank training depth past 6, add TT first.
-- **No make/unmake** — every `applyMove` allocates a new `Int8Array(32)`. That's the single
-  biggest remaining speed-up if you care about gens/sec: reusing a board buffer + undo
-  stack would probably 2–3× it.
+- **No hall-of-fame / coevolution.** The population is the only source of opponents. The
+  main Python repo's writeup flags this as the likely cause of the draw-plateau failure mode
+  at deeper self-play; the demo is shallow enough not to hit it, but adding a frozen
+  strongest-ever anchor opponent would be the natural next lever.
+- **No parallel workers.** One Worker, one CPU core. Splitting the 18 games/gen across two
+  Workers would roughly double gens/sec on any multi-core machine — but we haven't needed
+  it yet.
 
 ## Relationship to the Python repo
 

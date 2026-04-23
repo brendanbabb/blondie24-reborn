@@ -333,7 +333,8 @@ canvas#board {
   cursor: not-allowed;
   filter: grayscale(0.3);
 }
-#controls button#offer-draw {
+#controls button#offer-draw,
+#controls button#ask-resign {
   background: var(--panel-2);
   color: var(--fg);
   border: 1px solid var(--border);

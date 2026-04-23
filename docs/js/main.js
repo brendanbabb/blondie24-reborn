@@ -31,13 +31,14 @@
   const historyCtx = historyCanvas.getContext("2d");
   const newGameBtn = document.getElementById("new-game");
   const offerDrawBtn = document.getElementById("offer-draw");
+  const askResignBtn = document.getElementById("ask-resign");
   const resignBtn = document.getElementById("resign");
   const humanColorSel = document.getElementById("human-color");
 
   const AI_DEPTH = 4;
   const TRAIN_BURST_MS = 2000;   // evolution runs this long per AI turn
   const MIN_SEARCH_PAD_MS = 200; // small UX pad so moves don't snap instantly
-  const PRETRAIN_GENS = 2;       // gens to run between New Game and first move
+  const PRETRAIN_GENS = 3;       // gens to run between New Game and first move
 
   const state = {
     board: C.makeBoard(),
@@ -64,13 +65,18 @@
     latestSampleGameB: null,
     miniSlot: "A",         // which sample game is currently playing back: "A" or "B"
     miniPlayback: null,    // { game, step, finished, timer }
+    // How many times each slot has played since the last sample refresh. Once
+    // both slots hit MAX_PLAYS_PER_SLOT, playback halts until newer samples
+    // arrive (reset below in the gen-message handler).
+    miniPlayCounts: { A: 0, B: 0 },
+    miniHalted: false,
     historyGens: [],      // cumulative per-gen fitness stats across the whole game
     turnBoundaries: [],   // generation numbers at which each AI turn started
   };
 
   // ---- Worker setup ---------------------------------------------------------
 
-  const worker = new Worker("js/worker.js");
+  const worker = new Worker("js/worker.js?v=5");
   let pendingSnapshot = null;  // Promise resolver while a snapshot is in flight
 
   worker.onerror = (ev) => {
@@ -120,13 +126,31 @@
         document.getElementById("gen-delta").textContent = "+" + delta + " this turn";
         const elapsed = (performance.now() - state.genBurstStart) / 1000;
         if (elapsed > 0) {
-          document.getElementById("gens-per-sec").textContent = (delta / elapsed).toFixed(1);
+          const gps = delta / elapsed;
+          // Append the most recent gen's wall-clock ms so the user can see
+          // per-gen latency, not just averaged rate. Helps diagnose browser
+          // vs. Node throughput when the numbers diverge.
+          const genMsStr = (typeof msg.genMs === "number") ? ` (${msg.genMs.toFixed(0)} ms/gen)` : "";
+          document.getElementById("gens-per-sec").textContent = gps.toFixed(1) + genMsStr;
         }
       }
       document.getElementById("gen-counter").textContent = "gen " + msg.gen;
       renderLeaderboard(msg.leaderboard);
-      if (msg.sampleGameA) state.latestSampleGameA = msg.sampleGameA;
-      if (msg.sampleGameB) state.latestSampleGameB = msg.sampleGameB;
+      // A newer sample invalidates the old play-count for that slot, so the
+      // 2-runs-per-slot cap restarts fresh. If both slots were halted, bring
+      // the replay panel back to life on the fresher sample.
+      if (msg.sampleGameA) {
+        state.latestSampleGameA = msg.sampleGameA;
+        state.miniPlayCounts.A = 0;
+      }
+      if (msg.sampleGameB) {
+        state.latestSampleGameB = msg.sampleGameB;
+        state.miniPlayCounts.B = 0;
+      }
+      if ((msg.sampleGameA || msg.sampleGameB) && state.miniHalted) {
+        state.miniHalted = false;
+        startMiniPlayback(state.miniSlot || "A");
+      }
       return;
     }
     if (msg.type === "snapshot") {
@@ -442,6 +466,8 @@
     state.aiMoveCount = 0;
     state.latestSampleGameA = null;
     state.latestSampleGameB = null;
+    state.miniPlayCounts = { A: 0, B: 0 };
+    state.miniHalted = false;
     state.historyGens = [];
     state.turnBoundaries = [];
     stopAllMiniPlaybacks();
@@ -797,6 +823,7 @@
 
   const MINI_STEP_MS = 220;   // ms between frames
   const MINI_END_HOLD_MS = 1800;  // how long the winner banner stays up before swapping
+  const MAX_PLAYS_PER_SLOT = 2;   // 2 runs of Game A + 2 runs of Game B, then pause
 
   function latestSampleFor(slotId) {
     return slotId === "A" ? state.latestSampleGameA : state.latestSampleGameB;
@@ -858,16 +885,25 @@
     pb.step += 1;
     if (pb.step >= frames.length) {
       pb.finished = true;
+      // This playback finished — record it against the per-slot cap.
+      state.miniPlayCounts[pb.slotId] = (state.miniPlayCounts[pb.slotId] || 0) + 1;
       pb.timer = setTimeout(() => {
-        // Alternate: swap to the other slot if it has a game, else replay this one.
         const otherSlot = pb.slotId === "A" ? "B" : "A";
         const otherGame = latestSampleFor(otherSlot);
-        if (otherGame && otherGame.frames && otherGame.frames.length > 0) {
+        const otherOk = otherGame && otherGame.frames && otherGame.frames.length > 0;
+        const otherExhausted = (state.miniPlayCounts[otherSlot] || 0) >= MAX_PLAYS_PER_SLOT;
+        const selfExhausted = (state.miniPlayCounts[pb.slotId] || 0) >= MAX_PLAYS_PER_SLOT;
+
+        // Prefer swapping to the other slot, unless it's exhausted (or absent).
+        if (otherOk && !otherExhausted) {
           startMiniPlayback(otherSlot);
-        } else {
-          // No other-slot game; restart the current one (possibly with a
-          // refreshed frame set if a newer version arrived).
+        } else if (!selfExhausted) {
           startMiniPlayback(pb.slotId);
+        } else {
+          // Both slots have hit their 2-play cap. Halt until fresher samples
+          // arrive from the worker (see gen-message handler above).
+          state.miniHalted = true;
+          setMiniLabel(pb.slotId, miniCaptionFor(pb.game, frames.length - 1));
         }
       }, MINI_END_HOLD_MS);
       return;
@@ -1027,16 +1063,43 @@
     updateButtons();
   }
 
+  // Symmetric with onOfferDraw: human asks, AI decides based on its own-side
+  // evaluation. Resigns only if it thinks it's clearly losing. Threshold is
+  // wider than the draw threshold (0.30) because resignation concedes more —
+  // a noisy early-gen net shouldn't give up easily.
+  function onAskResign() {
+    if (state.finished || state.aiThinking) return;
+    if (state.board.currentPlayer !== humanSide()) return;
+    if (!state.aiNet) {
+      log("You can ask the AI to resign after it has moved at least once.");
+      return;
+    }
+    // It's the human's turn, so network.forward() on the current board scores
+    // from the human's perspective. Flip to get the AI's view.
+    const humanPerspective = state.aiNet.forward(state.board);
+    const aiPerspective = -humanPerspective;
+    const RESIGN_THRESHOLD = -0.65;
+    if (aiPerspective <= RESIGN_THRESHOLD) {
+      state.finished = true;
+      log(`AI resigns — it evaluates its position at ${aiPerspective.toFixed(2)}. You win.`);
+      updateButtons();
+    } else {
+      log(`AI plays on — it evaluates its position at ${aiPerspective >= 0 ? "+" : ""}${aiPerspective.toFixed(2)}.`);
+    }
+  }
+
   function updateButtons() {
     const yourTurn = state.gameActive && !state.finished && !state.aiThinking
                      && state.board.currentPlayer === humanSide();
     offerDrawBtn.disabled = !yourTurn || !state.aiNet;
+    askResignBtn.disabled = !yourTurn || !state.aiNet;
     resignBtn.disabled = !yourTurn;
   }
 
   canvas.addEventListener("click", onCanvasClick);
   newGameBtn.addEventListener("click", () => resetGame(true));
   offerDrawBtn.addEventListener("click", onOfferDraw);
+  askResignBtn.addEventListener("click", onAskResign);
   resignBtn.addEventListener("click", onResign);
   // Changing color before hitting New game just updates the color — doesn't
   // auto-start so the user stays in control of when training begins.
