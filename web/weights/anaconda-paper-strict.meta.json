@@ -1,8 +1,8 @@
 {
-  "source": "random init (seed 1729, --init-random 2001)",
+  "source": "checkpoint: best_gen0500.pt (from 2000-gen paper-2001-strict run)",
   "architecture": "Anaconda (2001)",
   "arch_key": "2001",
   "nWeights": 5048,
-  "generations": null,
-  "note": "Untrained random-init weights shipped as a placeholder. To get a real opponent, train locally and re-run this export."
+  "generations": 500,
+  "note": "Shipped gen 500 instead of gen 2000 from a paper-2001-strict run. Paper-strict uses unbounded sigma; by gen 850+ the network's tanh outputs saturate to +1 everywhere (score spread collapses to <0.01), making minimax useless. Gen 500 has the strongest position discrimination (fixture-score spread 1.66; max |w| ~19 is still within tanh's useful range)."
 }

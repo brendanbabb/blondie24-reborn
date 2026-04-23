@@ -53,7 +53,9 @@ def load_checkpoint_weights(path: Path) -> np.ndarray:
     if "weights" not in ckpt:
         raise SystemExit(f"Unexpected checkpoint format in {path}: keys={list(ckpt.keys())}")
     w = ckpt["weights"]
-    return w.detach().cpu().numpy().astype(np.float32)
+    if isinstance(w, torch.Tensor):
+        w = w.detach().cpu().numpy()
+    return np.asarray(w, dtype=np.float32)
 
 
 def init_random_weights(arch: str, seed: int = 1729) -> np.ndarray:
