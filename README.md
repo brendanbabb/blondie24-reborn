@@ -26,14 +26,54 @@ demo code deliberately has no build step, no dependencies, and no network calls.
 
 What you'll see:
 
-- The board you're playing on, with legal-move dots and forced-capture banners
-- A live mini-board that replays one of the AI's self-play training games while you think,
-  alternating between two different match-ups each round ("Game A" / "Game B")
-- A network-architecture panel that redraws on every AI move — the 1,743-weight net
-  laid out as 4 columns of nodes (32 → 40 → 10 → 1) with the 40 strongest weights per layer
-  drawn as colored edges (red negative, blue positive). Watch the edges shift as evolution reshapes
-  the champion from move to move.
-- Generation counter, gens/sec, and total AI compute time per game
+- **Playable board** with circular checker pieces, gold king markers, last-move highlights,
+  green legal-move dots and red capture-landing dots. Squares are labeled 1–32 (standard
+  checkers notation). Forced captures surface a red banner above the board listing which of
+  your pieces can jump.
+- **Controls row** (New game · Offer draw · Resign · color picker) sits right above the board.
+  The AI doesn't start training until you click **New game**, so you can pick your color first.
+  Offered draws are evaluated by the current champion network: if its own eval isn't > +0.30
+  it accepts.
+- **Pieces panel** — large tabular-figures count of your remaining pieces vs. the AI's, kings
+  tracked separately. Turns orange when either side drops to ≤3 pieces.
+- **Training stats** — generation counter, gens-this-turn delta, gens/sec, cumulative AI
+  think-time (broken down into "evolving" vs. "searching"), AI-moves-this-game count.
+- **Board evaluation bar** — the AI's score of the current position, flipped to be shown from
+  **your** perspective (so + = you're ahead). Red → Blue gradient with a verdict line
+  ("slight edge to you", "AI ahead", etc.).
+- **Self-play replay** — a mini-board animates one of the AI's training games from the last
+  generation, alternating between two different match-ups ("Game A" ↔ "Game B"). When
+  possible we pick decisive games (not draws) that pit a top-ranked network against a
+  lower-ranked one — more instructive than mid-pack matchups. Caption reads
+  `B:#3 r1 vs W:#0 r5 → Black wins`.
+- **Network architecture** — a canvas that redraws on every AI move. The 1,743-weight
+  champion net laid out as 4 columns of nodes (32 → 40 → 10 → 1), with the 40 strongest
+  connections per layer rendered as colored lines (red negative, blue positive, thickness
+  ∝ magnitude). The piece-difference bypass is drawn as a soft curve from the input centroid
+  to the output. Watch it shift as evolution reshapes the champion from move to move.
+- **Move history** — a scrollable numbered log of every move this game, colored by actor
+  (your moves one hue, AI's another).
+
+### How the AI trains (the 2-second cycle)
+
+Every AI turn, for ~2 seconds:
+
+1. Population of **6 networks** runs a self-play tournament — each plays **3 games** against
+   random opponents from the group.
+2. Training search: **3 plies** (opening/midgame), **5 plies** once ≤6 pieces remain on the
+   board — deeper endgame search prevents shuffle-draws when one side is materially ahead.
+3. Scoring is paper-faithful: **+1 win / 0 draw / −2 loss**.
+4. Top 3 networks survive; bottom 3 are replaced by **Gaussian self-adaptive EP mutations**
+   of the survivors (Schwefel rule for σ, no crossover — pure evolutionary programming).
+
+At 2 seconds per AI turn, the browser typically fits **4–10 generations** per turn. Across
+~30 AI moves in a game, the population runs through **100–200 generations** total. The paper
+reached Class-A play at ~250 generations, so one casual play session touches the interesting
+part of the learning curve.
+
+When the AI's 2 seconds are up, the current top-ranked network runs **depth-4 minimax** from
+the board you see (paper-faithful) and plays its move. Evolution pauses while you think, so
+the opponent you face at any point is frozen — it only changes between AI turns.
 
 > **A note on the name.** "Blondie24" is the screen name used on Zone.com by the 2001 "Anaconda"
 > system (Chellapilla & Fogel 2001), which added a spatial-preprocessing layer on top of the 1999
