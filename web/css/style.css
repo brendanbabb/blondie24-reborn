@@ -510,6 +510,38 @@ body.human-black #pieces-panel .pip-ai  { background: #e8e8e8; border-color: #88
   font-size: 13px;
 }
 
+/* AI's plan: prominent header showing the overall search score. */
+#plan-panel #plan-score {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 8px 0 6px;
+  padding: 8px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+#plan-panel #plan-score .label {
+  font-size: 10px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+#plan-panel #plan-score #plan-score-value {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--fg);
+  margin-right: auto;
+  text-shadow: 0 0 6px currentColor;
+}
+#plan-panel #plan-score .plan-score-note {
+  font-size: 10px;
+  color: var(--dim);
+  font-style: italic;
+}
+
 /* AI's plan: row of mini-boards with one ply per board. */
 #plan-panel .plan-row {
   display: grid;

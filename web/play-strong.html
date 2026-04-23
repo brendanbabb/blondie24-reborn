@@ -155,10 +155,18 @@
         <h2>AI's plan (next 6 plies)</h2>
         <p class="legend">
           The line the AI thinks will be played from here, derived from its
-          deepest search. Each board is one half-move (ply) ahead. Scores
-          alternate in sign because they're shown from each side's own
-          perspective.
+          deepest search. Each board is one half-move (ply) ahead. The
+          per-ply scores are static network evals (no further search) shown
+          from the side that just moved; they wobble. The single number
+          the AI actually optimized for is the <b>plan score</b> below —
+          the leaf eval at the end of the 6-ply line, shown from your
+          perspective so + = you ahead.
         </p>
+        <div id="plan-score" hidden>
+          <span class="label">Plan score</span>
+          <span id="plan-score-value">—</span>
+          <span class="plan-score-note">your view · 6-ply leaf</span>
+        </div>
         <div id="plan-row" class="plan-row" aria-live="polite"></div>
       </div>
 
@@ -380,10 +388,10 @@
 
 </main>
 
-<script src="js/checkers.js?v=15"></script>
-<script src="js/render.js?v=15"></script>
-<script src="js/anaconda-network.js?v=15"></script>
-<script src="js/minimax.js?v=15"></script>
-<script src="js/play-strong.js?v=15"></script>
+<script src="js/checkers.js?v=16"></script>
+<script src="js/render.js?v=16"></script>
+<script src="js/anaconda-network.js?v=16"></script>
+<script src="js/minimax.js?v=16"></script>
+<script src="js/play-strong.js?v=16"></script>
 </body>
 </html>

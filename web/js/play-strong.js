@@ -385,8 +385,10 @@
       updateSearchEffort(result);
       // Render the AI's predicted line into the mini-board strip. This is
       // the planning view — done before commit so the user sees what the
-      // AI thought *would* happen vs. what actually plays out.
-      renderAiPlan(state.board, result.pv || []);
+      // AI thought *would* happen vs. what actually plays out. Pass the
+      // overall search score so the panel can show "this is the leaf
+      // eval the AI was optimizing toward."
+      renderAiPlan(state.board, result.pv || [], result.score);
       const pad = Math.max(0, MIN_SEARCH_PAD_MS - searchMs);
       setTimeout(() => {
         state.aiThinking = false;
@@ -416,7 +418,26 @@
   }
 
   // ---- AI's plan (principal variation) mini-board strip ----
-  function renderAiPlan(rootBoard, pv) {
+  function renderAiPlan(rootBoard, pv, planScoreFromAi) {
+    // Header: overall search score, flipped to the human's perspective so
+    // it reads the same direction as the eval bar (+ = you ahead).
+    const planScoreEl = document.getElementById("plan-score");
+    const planScoreValEl = document.getElementById("plan-score-value");
+    if (planScoreEl && planScoreValEl && planScoreFromAi != null
+        && Number.isFinite(planScoreFromAi)) {
+      const fromHuman = -planScoreFromAi;
+      const clipped = Math.max(-1, Math.min(1, fromHuman));
+      planScoreValEl.textContent =
+        (clipped >= 0 ? "+" : "") + clipped.toFixed(3);
+      // Match the eval-bar palette so the overall direction is unmistakable.
+      planScoreValEl.style.color = clipped >= 0
+        ? EVAL_COLOR_POS
+        : EVAL_COLOR_NEG;
+      planScoreEl.hidden = false;
+    } else if (planScoreEl) {
+      planScoreEl.hidden = true;
+    }
+
     const row = document.getElementById("plan-row");
     if (!row) return;
     row.innerHTML = "";
@@ -502,6 +523,8 @@
   }
 
   function clearAiPlan() {
+    const planScoreEl = document.getElementById("plan-score");
+    if (planScoreEl) planScoreEl.hidden = true;
     const row = document.getElementById("plan-row");
     if (!row) return;
     row.innerHTML = "";
