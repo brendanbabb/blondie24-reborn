@@ -143,6 +143,21 @@
   function updateLabels() {
     blackNameEl.textContent = blackSlot().label;
     whiteNameEl.textContent = whiteSlot().label;
+    paintKingChip("black", blackNet());
+    paintKingChip("white", whiteNet());
+  }
+
+  // Render each side's evolved K as a gold pill next to the model name.
+  // Called from updateLabels so it stays correct across color swaps and
+  // on initial load. Pulled from the network wrapper (AnacondaNetwork
+  // exposes getKingWeight); `hidden` while the net isn't loaded yet so
+  // the header doesn't flash "K=—".
+  function paintKingChip(side, net) {
+    const chip = document.getElementById(side + "-king-chip");
+    if (!chip) return;
+    if (!net) { chip.hidden = true; return; }
+    chip.hidden = false;
+    chip.textContent = "K=" + net.getKingWeight().toFixed(2);
   }
 
   // ---- Eval bars ----

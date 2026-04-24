@@ -755,6 +755,23 @@ body.human-black #pieces-panel .pip-ai  { background: #e8e8e8; border-color: #88
   font-weight: 700;
   font-size: 13px;
 }
+/* Gold pill showing the evolved king-weight K for each side's network.
+   Sits to the right of the model label inside the panel header; matches
+   the chip style used on play-strong's architecture diagram so both
+   pages have visually consistent "K" affordances. */
+.match-eval h2 .king-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #1a1410;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  vertical-align: 1px;
+}
 
 .match-eval .match-eval-bar-wrap { margin: 4px 0 2px; }
 .match-eval .match-eval-bar {
