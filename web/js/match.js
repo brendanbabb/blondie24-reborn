@@ -39,9 +39,6 @@
   const EVAL_COLOR_POS = "#20c060";
   const EVAL_COLOR_NEG = "#e03030";
   const NEXT_GAME_DELAY_MS = 1500;     // pause between games in a series
-  const PLAN_PLIES = 6;
-  const PLAN_BOARD_PX = 72;
-  const PLAN_REVEAL_MS = 70;
 
   // ---- DOM refs ----
   const canvas         = document.getElementById("board");
@@ -62,7 +59,6 @@
   const seriesLog      = document.getElementById("series-log");
   const tallyLabelA    = document.getElementById("tally-label-a");
   const tallyLabelB    = document.getElementById("tally-label-b");
-  const planRow        = document.getElementById("plan-row");
   const moveCountEl    = document.getElementById("move-count");
   const moveLogEl      = document.getElementById("move-log");
   const moveHistoryEl  = document.getElementById("move-history");
@@ -220,8 +216,6 @@
     const isBlackTurn = state.board.currentPlayer === C.BLACK;
     const net   = isBlackTurn ? blackNet() : whiteNet();
     const slot  = isBlackTurn ? blackSlot() : whiteSlot();
-    // Snapshot the pre-move board so renderAiPlan can replay the PV from it.
-    const preMoveBoard = C.cloneBoard(state.board);
     const result = M.pickMove(state.board, state.depth, net);
     if (!result || !result.move) {
       state.finished = true;
@@ -250,86 +244,10 @@
     log(`${slot.label} (${isBlackTurn ? "B" : "W"}) plays ${describeMove(result.move)} · score ${(result.score >= 0 ? "+" : "") + result.score.toFixed(3)}`);
     render();
     updateEvals();
-    renderAiPlan(preMoveBoard, result.pv || [], slot, isBlackTurn);
 
     const ended = checkEnd();
     if (ended) { afterEnd(ended); return false; }
     return true;
-  }
-
-  // ---- AI plan mini-board strip (mirrors play-strong's visual) ----
-  function renderAiPlan(rootBoard, pv, moverSlot, moverWasBlack) {
-    if (!planRow) return;
-    planRow.innerHTML = "";
-    if (!pv || pv.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "plan-empty";
-      empty.textContent = "(no PV from this search)";
-      planRow.appendChild(empty);
-      return;
-    }
-    let board = C.cloneBoard(rootBoard);
-    const cells = [];
-    const limit = Math.min(PLAN_PLIES, pv.length);
-    // Side that moves at each successive ply alternates starting from
-    // moverWasBlack at ply 1.
-    for (let i = 0; i < limit; i++) {
-      const move = pv[i];
-      const plyMoverIsBlack = (i % 2 === 0) ? moverWasBlack : !moverWasBlack;
-      const plyMoverLabel = plyMoverIsBlack
-        ? blackSlot().label + " (B)"
-        : whiteSlot().label + " (W)";
-      const movedTo = move[move.length - 1];
-      board = C.applyMove(board, move);
-      // After the move, currentPlayer flipped. Eval is from the new
-      // side-to-move's perspective; flip to show from the just-moved side.
-      const moverNet = plyMoverIsBlack ? blackNet() : whiteNet();
-      const evalRaw = moverNet ? moverNet.forward(board) : 0;
-      const fromMover = -evalRaw;
-
-      const cell = document.createElement("div");
-      cell.className = "plan-cell";
-
-      const plyNum = document.createElement("div");
-      plyNum.className = "ply-num";
-      plyNum.textContent = "ply " + (i + 1);
-      cell.appendChild(plyNum);
-
-      const cv = document.createElement("canvas");
-      cv.width = PLAN_BOARD_PX;
-      cv.height = PLAN_BOARD_PX;
-      R.drawMini(cv.getContext("2d"), board.squares, {
-        size: PLAN_BOARD_PX,
-        highlightSq: movedTo,
-        pieceScale: 0.30,
-        pieceEdgeWidth: 1.1,
-      });
-      cell.appendChild(cv);
-
-      const actor = document.createElement("div");
-      actor.className = "ply-actor";
-      actor.textContent = plyMoverLabel;
-      cell.appendChild(actor);
-
-      const score = document.createElement("div");
-      score.className = "ply-score";
-      score.textContent = (fromMover >= 0 ? "+" : "") + fromMover.toFixed(2);
-      cell.appendChild(score);
-
-      planRow.appendChild(cell);
-      cells.push(cell);
-    }
-    cells.forEach((cell, i) => {
-      setTimeout(() => cell.classList.add("show"), i * PLAN_REVEAL_MS);
-    });
-  }
-  function clearAiPlan() {
-    if (!planRow) return;
-    planRow.innerHTML = "";
-    const empty = document.createElement("div");
-    empty.className = "plan-empty";
-    empty.textContent = "(starts after the first move)";
-    planRow.appendChild(empty);
   }
 
   // ---- Series ----
@@ -346,7 +264,6 @@
     showBanner(null);
     render();
     updateEvals();
-    clearAiPlan();
   }
   function applySwapForGameIdx() {
     // Game 0: slot-0 black, slot-1 white. Game 1: swap. Game 2: swap back.
@@ -511,7 +428,6 @@
       updateLabels();
       render();
       updateEvals();
-      clearAiPlan();
       log("Ready. Click Start to watch them play.");
       setPlaying(false);
     } catch (err) {
