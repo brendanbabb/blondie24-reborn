@@ -92,7 +92,7 @@ class TrainingConfig:
     log_every: int = 5              # print/log fitness stats
     
     # Device
-    device: str = "cuda"            # "cuda" for Badger-1's RTX 5060, "cpu" fallback
+    device: str = "cuda"            # "cuda" if available, "cpu" fallback
 
     # Multiprocessing (CPU only): number of worker processes for parallel
     # tournament play. None means "auto" (all cores - 1).

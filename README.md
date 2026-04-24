@@ -20,22 +20,26 @@ No install. Just serve the folder:
 cd web && python -m http.server --bind 127.0.0.1 8765
 ```
 
-Or enable GitHub Pages (Settings → Pages → Source: `main` / `/web`) and share the URL. The
-demo code deliberately has no build step, no dependencies, and no network calls. See
-[`web/index.html`](./web/index.html) for the explanation that renders in-page.
+Or publish via GitHub Pages and share the URL. This repo ships a workflow at
+[`.github/workflows/pages.yml`](./.github/workflows/pages.yml) that uploads `web/` as the
+Pages artifact on every push to `main`; enable it by setting Settings → Pages → Source =
+**GitHub Actions**. The demo code deliberately has no build step, no dependencies, and no
+network calls. See [`web/index.html`](./web/index.html) for the explanation that renders
+in-page.
 
 ### Companion page: play the fully-evolved Anaconda
 
 [`web/play-strong.html`](./web/play-strong.html) is a second browser page that plays against
 a **frozen, pre-trained** 2001 Anaconda network (5,048 weights, 91 sub-board filters +
-92→40→10→1 MLP) loaded from `web/weights/anaconda-paper-strict.bin` (or the Enhanced slot,
-if you've trained one — picker in the page header). Unlike the live-evolve page, no
-training happens while you play — it's the finished product of an offline training run. The AI
+92→40→10→1 MLP) loaded from `web/weights/anaconda-paper-strict.bin` — or the Enhanced
+slot, picked via the dropdown in the page header. Unlike the live-evolve page, no training
+happens while you play — it's the finished product of an offline training run. The AI
 searches at depth 6 on every move. Pure static — same GitHub Pages deployment, no extra setup.
 
-The page ships with a random-init placeholder `anaconda-paper-strict.bin` so the pipeline is testable out
-of the box; to get the real expert-level opponent the paper describes, train locally and
-overwrite the bin (instructions in the [training section below](#training-the-anaconda-opponent)).
+The repo ships real trained weights in both slots, so the page is playable out of the box.
+To retrain either opponent yourself, see the
+[training section below](#training-the-anaconda-opponent). Each bin has a sidecar
+`.meta.json` with the exact checkpoint, generation count, and training recipe it came from.
 
 The JS Anaconda inference (`web/js/anaconda-network.js`) is a pure-JavaScript port of
 [`neural/anaconda_network.py`](./neural/anaconda_network.py). It's cross-checked against the
@@ -92,12 +96,12 @@ gen-0 networks play chaotically and selection finds the useful weights on its ow
 clicking New game the worker runs **3 warmup generations** before the first move so the AI
 at least isn't literally random on move 1.
 
-At 2 seconds per AI turn at depth 4, the browser typically fits **6–10 generations** per turn
+At 2 seconds per AI turn at depth 4, the browser typically fits **~4–8 generations** per turn
 (the JS search uses make/unmake, a per-search Zobrist transposition table, and iterative
 deepening with TT-move-first ordering — all correctness-preserving speed-ups; see
 [`web/README.md`](./web/README.md) for details). Across ~30 AI moves in a game, the
-population runs through **180–300 generations** total. The paper reached Class-A play at
-~250 generations, so one casual play session now covers roughly the full A-class learning
+population runs through **~100–240 generations** total. The paper reached Class-A play at
+~250 generations, so one casual play session covers a meaningful slice of the A-class learning
 curve.
 
 When the AI's 2 seconds are up, the current top-ranked network runs **depth-4 minimax** from
@@ -174,10 +178,13 @@ opponent slots, picked from a dropdown:
   (asymmetric win-favoring scoring, quiescence on, optional depth-schedule curriculum)
   intended to break out of the paper-strict draw plateau.
 
-The repo ships a random-init placeholder for paper-strict so the page works out of the box.
-The enhanced slot ships empty (meta.json only, dropdown option disabled) until you train it.
+Both slots ship with real trained weights — see each slot's `.meta.json` sidecar for the
+exact checkpoint and training recipe. The currently-shipped paper-strict is gen 500 from a
+2000-gen run (gen 850+ saturated under unbounded σ and was unusable); the Enhanced is
+gen 240 from a two-phase paper-2001 + depth-6 finishing run (~64% win rate head-to-head
+vs. the previously-shipped Enhanced).
 
-To replace the paper-strict placeholder with a real trained opponent:
+To retrain paper-strict from scratch and re-ship it:
 
 ```bash
 # Step 1: train. ~47 min on a 24-core box for 850 generations at strict paper fidelity.
@@ -274,15 +281,15 @@ This implementation faithfully reproduces the architecture from the original 199
 - **Piece-difference bypass**: the sum of all 32 input values connects directly to the
   output node via a single learned weight, bypassing both hidden layers. This gives the
   network an implicit material-advantage signal without needing to learn it from scratch.
-- **Total evolvable parameters: 1,743**
-  - fc1: 32×40 weights + 40 biases = 1,320
-  - fc2: 40×10 weights + 10 biases = 410
-  - fc3: 10×1 weights + 1 bias = 11
-  - piece_diff_weight: 1 (bypass connection)
-  - king_weight: 1
-  - *The 1999 paper reports 1,742. The ±1 is whether the king weight is counted as
-    a network parameter or as a separate evolvable hyperparameter; the itemization
-    above counts it.*
+- **Total evolvable parameters: 1,743 = 1,742 (neural network) + 1 (king weight)**
+  - fc1: 32×40 weights + 40 biases = 1,320 &nbsp;&nbsp;&nbsp;┐
+  - fc2: 40×10 weights + 10 biases = 410  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│ 1,742 → neural network proper
+  - fc3: 10×1 weights + 1 bias = 11       &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│ (what the 1999 paper reports)
+  - piece_diff_weight: 1 (bypass connection)&nbsp;┘
+  - king_weight: 1  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← scalar K ∈ [1,3], scales king squares in the input encoding
+  - *The 1999 paper's "1,742" counts only the MLP + piece-diff bypass and treats K as a
+    separate evolvable hyperparameter. This repo evolves K with the same self-adaptive σ
+    rule as the other 1,742 weights, so we fold it into the flat vector and report 1,743.*
 - All evolved via evolutionary programming — none trained by backpropagation
 
 > **The 2001 "Anaconda" / Blondie24 system is also implemented here.** It adds a spatial
@@ -366,7 +373,7 @@ One code-level deviation we have not yet corrected, flagged here for honesty:
 | Leaf evaluation | scalar C forward pass | Numba-JIT'd scalar loop **or** batched GPU forward | GPU path batches all in-flight tournament games in a single kernel |
 | Alpha-beta recursion | interpreted/C hybrid | fully JIT-compiled (`FastAgentJit`) | Python interpreter eliminated from the tree |
 | Transposition table | none reported | 1 M-slot Zobrist TT, open-addressing, replace-always | ~2× alone at depth 8, ~45% fewer leaf evals |
-| Tournament scheduling | serial games | multiprocess pool (CPU) / lockstep scheduler (GPU) | 23 workers on Badger-1 CPU path; GPU path batches NN evals *across games* |
+| Tournament scheduling | serial games | multiprocess pool (CPU) / lockstep scheduler (GPU) | ~23 workers on a 24-core CPU path; GPU path batches NN evals *across games* |
 | Search depth | 4 ply throughout training | depth schedule, e.g. `0:2,8:4,16:6,24:8` | Shallow play is cheap; deep play gates harder selection later |
 
 **End-to-end:** a baseline generation (population 20, depth 8, full round-robin) dropped from
@@ -387,7 +394,7 @@ tiny — a single forward pass is dominated by Python→CUDA kernel launch and
 host↔device sync overhead, not by actual floating-point work. Until you can batch
 hundreds of positions into one kernel, the CPU numpy+Numba path is strictly faster.
 
-Empirically on Badger-1 (RTX 5060 + 24-core CPU):
+Empirically on a consumer box (RTX 5060 + 24-core CPU):
 
 - **Depth 2**: CPU ~0.3 s/gen at pop 20 full round-robin. GPU: several seconds, worse.
   Almost every leaf is a terminal or near-terminal state and the branching factor is
@@ -554,32 +561,61 @@ blondie24-reborn/
 ├── test_smoke.py              # Smoke tests for all components
 │
 ├── checkers/
-│   ├── board.py               # Board state representation (32-square array)
+│   ├── board.py               # Pure-Python board state (32-square array)
+│   ├── fast_board.py          # Numba-compatible board ops for the JIT search path
 │   └── game.py                # Game loop: play a complete game between two agents
 │
 ├── neural/
-│   ├── network.py             # PyTorch feedforward network (32→40→10→1), 1,742 weights
-│   └── encoding.py            # Board state → tensor encoding (vectorized numpy)
+│   ├── network.py             # PyTorch 1999 net (32→40→10→1), 1,743 weights
+│   ├── anaconda_network.py    # PyTorch 2001 Anaconda net, 5,048 weights
+│   ├── anaconda_windows.py    # Deterministic 91 sub-board windows (3×3…8×8)
+│   ├── encoding.py            # Board state → tensor encoding (vectorized numpy)
+│   ├── fast_eval.py           # Numba-JIT forward pass for the 1999 net
+│   └── fast_eval_anaconda.py  # Numba-JIT forward pass for Anaconda
 │
 ├── search/
-│   └── minimax.py             # Minimax + alpha-beta with batched GPU leaf evaluation
+│   ├── minimax.py             # Reference alpha-beta + GPU batched leaves (1999 net)
+│   ├── fast_minimax.py        # Pure-numpy alpha-beta (correctness reference)
+│   ├── fast_minimax_jit.py    # Numba-JIT alpha-beta + Zobrist TT (1999)
+│   ├── fast_minimax_jit_anaconda.py   # Numba-JIT alpha-beta for Anaconda
+│   ├── fast_minimax_gpu_anaconda.py   # CUDA batched leaf-eval for Anaconda
+│   ├── parallel_search.py     # Lockstep GPU scheduler (batches across games)
+│   └── _order_helpers.py      # Move-ordering utilities shared across engines
 │
 ├── evolution/
 │   ├── population.py          # Population management, selection, reproduction
 │   ├── strategy.py            # Evolutionary strategy (self-adaptive σ mutation)
-│   └── tournament.py          # Round-robin or random-pairing tournament (GPU-aware)
+│   └── tournament.py          # Round-robin / random-pairing tournaments (GPU-aware)
 │
 ├── training/
-│   └── train.py               # Main training loop (evolution driver, GPU auto-detect)
+│   └── train.py               # Main training loop (evolution driver, device auto-detect)
 │
 ├── play/
-│   └── human_vs_ai.py         # Play against the best evolved network
+│   └── human_vs_ai.py         # Play against a loaded checkpoint in the terminal
 │
 ├── utils/
 │   └── __init__.py            # GPU detection, TF32 optimization, memory management
 │
-└── analysis/
-    └── benchmark_gpu.py       # Benchmark CPU vs GPU throughput
+├── analysis/
+│   ├── benchmark_gpu.py       # CPU vs GPU throughput benchmark
+│   └── compare_tournaments.py # Compare round-robin vs random-pairing fitness signals
+│
+├── scripts/
+│   ├── ai_vs_ai.py                    # Head-to-head matches between two checkpoints
+│   ├── export_weights_to_js.py        # Checkpoint → web/weights/*.bin + fixtures
+│   ├── bench_iddfs.py                 # Iterative-deepening benchmark
+│   ├── profile_tournament.py          # cProfile harness for one tournament gen
+│   ├── test_jit_correctness.py        # JIT alpha-beta vs. reference bit-check (1999)
+│   ├── test_jit_anaconda_correctness.py
+│   └── test_tt_correctness.py         # Transposition-table correctness check
+│
+└── web/                                 # Static browser demo (no build, no deps)
+    ├── index.html                       # Live-evolve page (1999 net, in-browser EP)
+    ├── play-strong.html                 # Play the frozen Anaconda champion
+    ├── match.html                       # Paper-strict vs Enhanced auto-play viewer
+    ├── bench.html                       # Main-thread throughput bench
+    ├── js/                              # Engine + UI (vanilla JS + Web Worker)
+    └── weights/                         # Shipped *.bin + *.meta.json for each slot
 ```
 
 ## Getting Started
@@ -608,7 +644,7 @@ pip install -r requirements.txt
 # CPU (slow but works)
 python -m training.train --generations 250 --population 15 --depth 4
 
-# GPU on Badger-1 (RTX 5060)
+# GPU (e.g. RTX 5060)
 python -m training.train --generations 250 --population 15 --depth 6 --device cuda
 ```
 
@@ -623,7 +659,7 @@ python -m play.human_vs_ai --checkpoint checkpoints/best_gen250.pt
 ### Why PyTorch instead of raw numpy?
 The neural net forward pass happens thousands of times per game (once per minimax leaf node).
 With depth-6 search, that's potentially millions of evaluations per generation. PyTorch lets us
-batch evaluations on GPU, which is where Badger-1's RTX 5060 pays off.
+batch evaluations on GPU, which is where an RTX 5060 pays off.
 
 ### Why evolutionary programming instead of a "true" genetic algorithm?
 Fogel's original used EP (mutation only, no crossover) because crossover on neural network

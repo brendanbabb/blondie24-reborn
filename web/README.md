@@ -26,7 +26,8 @@ cd web && python -m http.server --bind 127.0.0.1 8765
 # open http://localhost:8765/
 ```
 
-For GitHub Pages: repo Settings → Pages → Source = `main` / `/web`.
+For GitHub Pages: repo Settings → Pages → Source = **GitHub Actions**. The workflow at
+`.github/workflows/pages.yml` (one level up) uploads this folder on every push to `main`.
 
 ## File layout
 
@@ -43,8 +44,8 @@ web/
 │                             transposition table, and iterative deepening + TT-move-first
 │                             ordering; capture-length move ordering as fallback
 ├── js/render.js            main board canvas renderer + mini-board (for the self-play replay)
-├── js/worker.js            Web Worker: EP loop, pop=6, games-per-ind=3, adaptive training
-│                             depth (3 opening / 5 endgame), records all games each gen and
+├── js/worker.js            Web Worker: EP loop, pop=6, games-per-ind=3, flat depth-4
+│                             self-play (paper-faithful), records all games each gen and
 │                             picks decisive strong-vs-weak pairings for the replay
 └── js/main.js              UI glue: click-to-move, forced-jump enforcement, training panel,
                               live leaderboard (currently hidden), eval bar, self-play

@@ -1,7 +1,7 @@
 """
 GPU utilities: device detection, info reporting, and memory management.
 
-Designed for Badger-1 (RTX 5060) but works on any CUDA-capable system.
+Developed against an RTX 5060 but works on any CUDA-capable system.
 """
 
 import torch
