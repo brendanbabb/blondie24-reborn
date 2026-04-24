@@ -1,8 +1,8 @@
 {
-  "source": "checkpoint: best_gen0240.pt (paper-2001 v3 + 40-gen depth-6 resume)",
+  "source": "checkpoint: best_gen0270.pt (gen 240 base + 20 gens d7 + 10 gens d8)",
   "architecture": "Anaconda (2001)",
   "arch_key": "2001",
   "nWeights": 5048,
-  "generations": 240,
-  "note": "Trained in two phases: (1) paper-2001 + win=+2/loss=-1 + max-sigma 0.5 + pop 30 + curriculum 0:3,20:4,80:5,180:6 for 200 gens; (2) resumed and ran 40 more gens at flat depth 6 from best_gen0200.pt. The depth-6 finishing phase added meaningful play strength: gen 240 beats the previous shipped Enhanced (pop-15 gen 200) by 18-10 in 28 decisive games over 150 head-to-head games (~64% win rate, ~91% confidence), and beats shipped paper-strict by 32-1-27 in 60 games. Sigma stayed bounded (max 0.065)."
+  "generations": 270,
+  "note": "Resumes the previous Enhanced (gen 240) and adds a 30-gen finishing phase at asymmetric +2/0/-1 scoring, max-sigma 0.5, pop 30, quiescence on: gens 241-260 at depth 7, gens 261-270 at depth 8. At 150 games head-to-head (depth 6, random-opening 8, seed 42) gen 270 beats gen 240 by +9 tournament points (24W/15L/111D); decisive-game win rate 62%. Draw plateau is still large (111/150 = 74%) — this checkpoint incrementally improves play, not a qualitative jump. Gen 270 is statistically tied with the subsequent pop-50 gen 335 across 400 combined games, so the ship target was chosen on margin-vs-shipped rather than head-to-head vs alternate candidates. Final king weight K=1.47 (paper-init 2.0)."
 }

@@ -181,8 +181,9 @@ opponent slots, picked from a dropdown:
 Both slots ship with real trained weights — see each slot's `.meta.json` sidecar for the
 exact checkpoint and training recipe. The currently-shipped paper-strict is gen 500 from a
 2000-gen run (gen 850+ saturated under unbounded σ and was unusable); the Enhanced is
-gen 240 from a two-phase paper-2001 + depth-6 finishing run (~64% win rate head-to-head
-vs. the previously-shipped Enhanced).
+**gen 270** from the two-phase paper-2001 base (to gen 240) plus a 30-gen d7/d8 finishing
+curriculum. Gen 270 beats the previous shipped Enhanced (gen 240) by +9 tournament points
+over a 150-game head-to-head at depth 6 (24W/15L/111D; 62% decisive-game win rate).
 
 To retrain paper-strict from scratch and re-ship it:
 

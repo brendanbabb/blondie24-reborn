@@ -25,14 +25,14 @@
     {
       id: "paper-strict",
       label: "Paper-strict",
-      weightsUrl: "weights/anaconda-paper-strict.bin?v=19",
-      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=19",
+      weightsUrl: "weights/anaconda-paper-strict.bin?v=27",
+      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=27",
     },
     {
       id: "enhanced",
       label: "Enhanced",
-      weightsUrl: "weights/anaconda-enhanced.bin?v=19",
-      metaUrl:    "weights/anaconda-enhanced.meta.json?v=19",
+      weightsUrl: "weights/anaconda-enhanced.bin?v=27",
+      metaUrl:    "weights/anaconda-enhanced.meta.json?v=27",
     },
   ];
   const MAX_MOVES = 200;

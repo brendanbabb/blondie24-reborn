@@ -34,15 +34,15 @@
     {
       id: "paper-strict",
       label: "Paper-strict",
-      weightsUrl: "weights/anaconda-paper-strict.bin?v=20",
-      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=20",
+      weightsUrl: "weights/anaconda-paper-strict.bin?v=27",
+      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=27",
       available:  true,
     },
     {
       id: "enhanced",
       label: "Enhanced",
-      weightsUrl: "weights/anaconda-enhanced.bin?v=20",
-      metaUrl:    "weights/anaconda-enhanced.meta.json?v=20",
+      weightsUrl: "weights/anaconda-enhanced.bin?v=27",
+      metaUrl:    "weights/anaconda-enhanced.meta.json?v=27",
       available:  true,
     },
   ];
