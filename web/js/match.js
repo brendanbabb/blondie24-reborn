@@ -436,6 +436,15 @@
   depthSelect.addEventListener("change", () => {
     state.depth = parseInt(depthSelect.value, 10);
   });
+  // Update the Start button label so it's obvious that >1 means a series
+  // (otherwise the Games input is too easy to miss).
+  function refreshStartLabel() {
+    if (state.playing) return;
+    const n = Math.max(1, Math.min(50, parseInt(gamesInput.value, 10) || 1));
+    startBtn.textContent = n > 1 ? `Start ${n}-game series` : "Start";
+  }
+  gamesInput.addEventListener("input", refreshStartLabel);
+  refreshStartLabel();
 
   // ---- Boot ----
   async function loadAll() {
