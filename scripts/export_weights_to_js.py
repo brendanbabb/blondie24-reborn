@@ -43,7 +43,18 @@ N_2001 = 5048
 
 def load_checkpoint_weights(path: Path) -> np.ndarray:
     """Load a .pt checkpoint and return the flat weight vector."""
-    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    # weights_only=True blocks arbitrary pickle RCE during load. Our
+    # checkpoints store the flat weights as a numpy array, so we narrowly
+    # allowlist numpy's ndarray reconstructor — still safe (the allowlist
+    # is a function-by-function opt-in, not arbitrary code execution).
+    with torch.serialization.safe_globals([
+        np._core.multiarray._reconstruct,
+        np.ndarray,
+        np.dtype,
+        np.dtypes.Float32DType,
+        np.dtypes.Float64DType,
+    ]):
+        ckpt = torch.load(path, map_location="cpu", weights_only=True)
 
     # Two supported shapes:
     #   1) {"weights": tensor, "sigmas": tensor}                      (best_genN.pt)

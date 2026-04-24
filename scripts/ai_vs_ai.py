@@ -79,7 +79,18 @@ def load_weights(path: str) -> np.ndarray:
     """Load a .pt checkpoint and return the flat weight vector. Mirrors
     the dispatch in scripts/export_weights_to_js.py — checkpoints can
     have either a numpy array or a torch tensor under "weights"."""
-    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    # weights_only=True blocks arbitrary pickle RCE during load. Our
+    # checkpoints store the flat weights as a numpy array, so we narrowly
+    # allowlist numpy's ndarray reconstructor — still safe (the allowlist
+    # is a function-by-function opt-in, not arbitrary code execution).
+    with torch.serialization.safe_globals([
+        np._core.multiarray._reconstruct,
+        np.ndarray,
+        np.dtype,
+        np.dtypes.Float32DType,
+        np.dtypes.Float64DType,
+    ]):
+        ckpt = torch.load(path, map_location="cpu", weights_only=True)
     if isinstance(ckpt, list):
         ckpt = ckpt[0]
     w = ckpt["weights"]
