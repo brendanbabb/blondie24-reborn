@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Blondie24 Reborn — Models Match</title>
+<link rel="stylesheet" href="css/style.css?v=18" />
+<style>
+  /* Match page is a two-column layout — board on the left, controls and
+     two side-by-side eval panels on the right. */
+  #game {
+    grid-template-columns: 480px minmax(280px, 1fr);
+    grid-template-areas: "board status";
+  }
+  @media (max-width: 900px) {
+    #game {
+      grid-template-columns: 1fr;
+      grid-template-areas: "board" "status";
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Blondie24 Reborn — Models Match</h1>
+    <p class="subtitle">
+      Watch the two trained Anaconda networks play each other, move by move.
+      <a href="play-strong.html">← Back to play vs Anaconda</a>
+    </p>
+    <details id="about">
+      <summary>What am I looking at?</summary>
+      <p>
+        Both <b>Paper-strict</b> (gen 500 of a paper-faithful 2000-gen run)
+        and <b>Enhanced</b> (gen 200 of a 1000-gen run with asymmetric
+        scoring, quiescence on, depth curriculum, and σ ceiling) are loaded
+        and play each other at the chosen depth. Each side's evaluation of
+        the current position is shown so you can see when they disagree
+        about who's ahead — that's where the strength gap lives.
+      </p>
+      <p>
+        Default depth is 4 to keep the per-move search snappy. Crank it up
+        to 6 for closer-to-real play (each move will pause longer while the
+        AI thinks).
+      </p>
+    </details>
+  </header>
+
+  <section id="game">
+    <div id="board-wrap">
+      <section id="controls">
+        <button id="start">Start</button>
+        <button id="pause" disabled>Pause</button>
+        <button id="step">Step</button>
+        <button id="reset">Reset</button>
+        <button id="swap" type="button">Swap colors</button>
+      </section>
+      <canvas id="board" width="480" height="480"></canvas>
+      <div id="status-banner" hidden></div>
+      <div id="move-log" aria-live="polite">Loading networks…</div>
+    </div>
+
+    <aside id="side-panel">
+      <div class="panel" id="settings-panel">
+        <h2>Settings</h2>
+        <div class="setting-row">
+          <label for="speed">Speed</label>
+          <input type="range" id="speed" min="200" max="3000" step="100" value="900" />
+          <span id="speed-label" class="setting-val">900 ms</span>
+        </div>
+        <div class="setting-row">
+          <label for="depth">Depth</label>
+          <select id="depth">
+            <option value="3">3 plies</option>
+            <option value="4" selected>4 plies</option>
+            <option value="5">5 plies</option>
+            <option value="6">6 plies</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Move</span>
+          <span id="move-count" class="setting-val">0</span>
+        </div>
+      </div>
+
+      <div class="panel match-eval" id="black-panel">
+        <h2>Black: <span id="black-name" class="model-label">—</span></h2>
+        <div class="match-eval-bar-wrap">
+          <div class="match-eval-bar">
+            <div class="match-eval-bar-fill" id="black-eval-fill"></div>
+            <div class="match-eval-bar-center"></div>
+          </div>
+          <div class="eval-labels">
+            <span>White ahead</span>
+            <span>even</span>
+            <span>Black ahead</span>
+          </div>
+        </div>
+        <div class="match-eval-summary">
+          <span id="black-eval-number">—</span>
+          <span id="black-eval-verdict" class="dim">waiting…</span>
+        </div>
+      </div>
+
+      <div class="panel match-eval" id="white-panel">
+        <h2>White: <span id="white-name" class="model-label">—</span></h2>
+        <div class="match-eval-bar-wrap">
+          <div class="match-eval-bar">
+            <div class="match-eval-bar-fill" id="white-eval-fill"></div>
+            <div class="match-eval-bar-center"></div>
+          </div>
+          <div class="eval-labels">
+            <span>Black ahead</span>
+            <span>even</span>
+            <span>White ahead</span>
+          </div>
+        </div>
+        <div class="match-eval-summary">
+          <span id="white-eval-number">—</span>
+          <span id="white-eval-verdict" class="dim">waiting…</span>
+        </div>
+      </div>
+
+      <div class="panel" id="history-panel">
+        <h2>Move history</h2>
+        <ol id="move-history" aria-label="Move history"></ol>
+      </div>
+    </aside>
+  </section>
+</main>
+
+<script src="js/checkers.js?v=18"></script>
+<script src="js/render.js?v=18"></script>
+<script src="js/anaconda-network.js?v=18"></script>
+<script src="js/minimax.js?v=18"></script>
+<script src="js/match.js?v=18"></script>
+</body>
+</html>
