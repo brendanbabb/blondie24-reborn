@@ -49,3 +49,6 @@ __pycache__/
 # name is literally "{checkers,neural,search,evolution,training,play,analysis}".
 # Don't track it; the real directories live at the top level already.
 {checkers,neural,search,evolution,training,play,analysis}/
+
+# Scratch dir for ai_vs_ai checkpoint probing
+probe/
