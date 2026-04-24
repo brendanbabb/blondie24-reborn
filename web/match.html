@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Blondie24 Reborn — Models Match</title>
-<link rel="stylesheet" href="css/style.css?v=25" />
+<link rel="stylesheet" href="css/style.css?v=26" />
 <style>
   /* Match page is a two-column layout — board on the left, controls and
      two side-by-side eval panels on the right. */
@@ -41,6 +41,18 @@
         Default depth is 4 to keep the per-move search snappy. Crank it up
         to 6 for closer-to-real play (each move will pause longer while
         the AI thinks).
+      </p>
+      <p>
+        <b>Why so many draws — and the "should have won" note:</b> the
+        Anaconda networks have a known draw plateau. The tanh-saturated
+        evaluator treats "winning in 3 moves" and "winning in 30 moves" as
+        identical +1 scores, so an overwhelming material advantage can
+        shuffle into threefold repetition instead of a finish. When a draw
+        fires with one side clearly ahead on material (e.g. 7 pieces vs
+        1 king), the banner and series log annotate it with an <i>"X
+        had Ym+ZK vs W but couldn't convert"</i> note. The tournament
+        score is unchanged — a draw is still a draw — the annotation is
+        just honest about whose technique failed.
       </p>
       <p>
         <b>Random opening plies:</b> minimax is deterministic — same
@@ -189,10 +201,10 @@
   </section>
 </main>
 
-<script src="js/checkers.js?v=25"></script>
-<script src="js/render.js?v=25"></script>
-<script src="js/anaconda-network.js?v=25"></script>
-<script src="js/minimax.js?v=25"></script>
-<script src="js/match.js?v=25"></script>
+<script src="js/checkers.js?v=26"></script>
+<script src="js/render.js?v=26"></script>
+<script src="js/anaconda-network.js?v=26"></script>
+<script src="js/minimax.js?v=26"></script>
+<script src="js/match.js?v=26"></script>
 </body>
 </html>

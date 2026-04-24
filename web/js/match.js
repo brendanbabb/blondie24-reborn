@@ -81,6 +81,7 @@
     lastCaptured: [],
     stateCounts: Object.create(null),
     finished: false,
+    lastAdjudication: null,
     playing: false,
     timer: null,
     blackSlotIdx: 0,
@@ -219,6 +220,13 @@
   // ---- Game-end checks ----
   // Returns one of "BLACK", "WHITE", "DRAW", or null (game still going).
   // Sets state.finished and shows the banner as a side effect when ended.
+  //
+  // For draws, we also compute a "material adjudication" — *does not* change
+  // the tournament score (a draw is still a draw per the rules), but annotates
+  // obvious should-have-won positions so the user sees that the network
+  // failed to convert. These networks have a well-documented draw plateau:
+  // tanh-saturated evals treat "winning in 3" and "winning in 30" identically,
+  // so overwhelming material advantages can shuffle into threefold repetition.
   function checkEnd() {
     const [over, winner] = C.isGameOver(state.board);
     if (over) {
@@ -231,21 +239,93 @@
         showBanner(`${whiteSlot().label} wins (no legal moves for opponent)`);
         return "WHITE";
       }
-      showBanner("Draw", "info");
+      // No-moves-for-anyone draw (rare — usually only if both sides have no
+      // pieces, which isn't reachable). Still adjudicate just in case.
+      const adj = adjudicateDraw();
+      state.lastAdjudication = adj;
+      showBanner("Draw" + (adj ? ` — ${adj.desc}` : ""), "info");
       return "DRAW";
     }
     if (state.moveCount >= MAX_MOVES) {
       state.finished = true;
-      showBanner(`Draw — move cap (${MAX_MOVES})`, "info");
+      const adj = adjudicateDraw();
+      state.lastAdjudication = adj;
+      showBanner(
+        `Draw — move cap (${MAX_MOVES})` + (adj ? ` · ${adj.desc}` : ""),
+        "info"
+      );
       return "DRAW";
     }
     const key = C.stateKey(state.board);
     if (state.stateCounts[key] >= 3) {
       state.finished = true;
-      showBanner("Draw — threefold repetition", "info");
+      const adj = adjudicateDraw();
+      state.lastAdjudication = adj;
+      showBanner(
+        "Draw — threefold repetition" + (adj ? ` · ${adj.desc}` : ""),
+        "info"
+      );
       return "DRAW";
     }
     return null;
+  }
+
+  // Count material on the current board. King = 2 (matches the paper's K
+  // convention); man = 1. Weighted score is what the "should have won"
+  // verdict looks at; raw piece counts are what we display ("4m+2K").
+  function materialCounts(board) {
+    let bMen = 0, bK = 0, wMen = 0, wK = 0;
+    for (let i = 0; i < 32; i++) {
+      const p = board.squares[i];
+      if (p === C.BLACK_PIECE) bMen++;
+      else if (p === C.BLACK_KING) bK++;
+      else if (p === C.WHITE_PIECE) wMen++;
+      else if (p === C.WHITE_KING) wK++;
+    }
+    return { bMen, bK, wMen, wK, bTotal: bMen + bK, wTotal: wMen + wK };
+  }
+
+  // Return a { winner, label, desc, short } annotation when one side has a
+  // clearly-winning material advantage at draw time, else null. Triggers
+  // on a weighted material gap of ≥ 3 (king=2, man=1 — so 3K vs 1K hits
+  // at gap=4, 6m vs 3m hits at gap=3, 7m+2K vs 1K hits at gap=10).
+  //
+  // Deliberately below that threshold:
+  //   - 2K vs 1K is a theoretical DRAW for the weaker side (lone king can
+  //     always reach the long-diagonal haven) — gap=2, not adjudicated.
+  //   - 5m vs 4m is a small material edge that doesn't reliably convert
+  //     — gap=1, not adjudicated.
+  //   - 1K+2m vs 2m is ambiguous endgame material — gap=2, not adjudicated.
+  function adjudicateDraw() {
+    const m = materialCounts(state.board);
+    const bw = m.bMen + 2 * m.bK;
+    const ww = m.wMen + 2 * m.wK;
+    const gap = Math.abs(bw - ww);
+    if (gap < 3) return null;
+
+    function fmt(men, k) {
+      if (men === 0 && k === 0) return "0";
+      if (men === 0) return `${k}K`;
+      if (k === 0) return `${men}m`;
+      return `${men}m+${k}K`;
+    }
+    const bDesc = fmt(m.bMen, m.bK);
+    const wDesc = fmt(m.wMen, m.wK);
+
+    if (bw > ww) {
+      return {
+        winner: "BLACK",
+        label: blackSlot().label,
+        desc: `${blackSlot().label} had ${bDesc} vs ${wDesc} but couldn't convert`,
+        short: `${blackSlot().label} adv ${bDesc}/${wDesc}`,
+      };
+    }
+    return {
+      winner: "WHITE",
+      label: whiteSlot().label,
+      desc: `${whiteSlot().label} had ${wDesc} vs ${bDesc} but couldn't convert`,
+      short: `${whiteSlot().label} adv ${wDesc}/${bDesc}`,
+    };
   }
 
   // ---- The actual move loop ----
@@ -299,6 +379,7 @@
     state.lastCaptured = [];
     state.stateCounts = Object.create(null);
     state.finished = false;
+    state.lastAdjudication = null;
     moveCountEl.textContent = "0";
     moveHistoryEl.innerHTML = "";
     showBanner(null);
@@ -350,13 +431,17 @@
   }
   function recordGameResult(outcome) {
     // outcome is "BLACK", "WHITE", or "DRAW". Translate to per-slot tally.
+    // Draw tally/score is unchanged whether or not material adjudication
+    // triggered — a draw is still a draw by the rules. The adjudication
+    // note is informational only.
     const blackIdx = state.blackSlotIdx;
     const whiteIdx = state.whiteSlotIdx;
     let summary;
     if (outcome === "DRAW") {
       state.tally[blackIdx].d += 1;
       state.tally[whiteIdx].d += 1;
-      summary = "draw";
+      const adj = state.lastAdjudication;
+      summary = adj ? `draw (${adj.short})` : "draw";
     } else if (outcome === "BLACK") {
       state.tally[blackIdx].w += 1;
       state.tally[whiteIdx].l += 1;
