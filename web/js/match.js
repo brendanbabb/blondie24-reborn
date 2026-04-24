@@ -25,19 +25,23 @@
     {
       id: "paper-strict",
       label: "Paper-strict",
-      weightsUrl: "weights/anaconda-paper-strict.bin?v=18",
-      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=18",
+      weightsUrl: "weights/anaconda-paper-strict.bin?v=19",
+      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=19",
     },
     {
       id: "enhanced",
       label: "Enhanced",
-      weightsUrl: "weights/anaconda-enhanced.bin?v=18",
-      metaUrl:    "weights/anaconda-enhanced.meta.json?v=18",
+      weightsUrl: "weights/anaconda-enhanced.bin?v=19",
+      metaUrl:    "weights/anaconda-enhanced.meta.json?v=19",
     },
   ];
   const MAX_MOVES = 200;
   const EVAL_COLOR_POS = "#20c060";
   const EVAL_COLOR_NEG = "#e03030";
+  const NEXT_GAME_DELAY_MS = 1500;     // pause between games in a series
+  const PLAN_PLIES = 6;
+  const PLAN_BOARD_PX = 72;
+  const PLAN_REVEAL_MS = 70;
 
   // ---- DOM refs ----
   const canvas         = document.getElementById("board");
@@ -50,6 +54,15 @@
   const speedInput     = document.getElementById("speed");
   const speedLabel     = document.getElementById("speed-label");
   const depthSelect    = document.getElementById("depth");
+  const gamesInput     = document.getElementById("games");
+  const seriesPanel    = document.getElementById("series-panel");
+  const seriesProgress = document.getElementById("series-progress");
+  const seriesTallyA   = document.getElementById("series-tally-a");
+  const seriesTallyB   = document.getElementById("series-tally-b");
+  const seriesLog      = document.getElementById("series-log");
+  const tallyLabelA    = document.getElementById("tally-label-a");
+  const tallyLabelB    = document.getElementById("tally-label-b");
+  const planRow        = document.getElementById("plan-row");
   const moveCountEl    = document.getElementById("move-count");
   const moveLogEl      = document.getElementById("move-log");
   const moveHistoryEl  = document.getElementById("move-history");
@@ -74,6 +87,14 @@
     nets: { 0: null, 1: null },   // keyed by slot index, populated on load
     speedMs: parseInt(speedInput.value, 10),
     depth: parseInt(depthSelect.value, 10),
+    // Series state. seriesTotal=1 → single game, no series UI shown.
+    // For N>1, we track per-slot (not per-color) W/L/D so the tally is
+    // attributed to the correct network even as colors swap each game.
+    // seriesGameIdx is 0-indexed; on game k, slot 0 plays BLACK if k is even.
+    seriesTotal: 1,
+    seriesGameIdx: 0,
+    seriesActive: false,
+    tally: { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 } },
   };
 
   // ---- Helpers ----
@@ -160,28 +181,35 @@
   }
 
   // ---- Game-end checks ----
+  // Returns one of "BLACK", "WHITE", "DRAW", or null (game still going).
+  // Sets state.finished and shows the banner as a side effect when ended.
   function checkEnd() {
     const [over, winner] = C.isGameOver(state.board);
     if (over) {
       state.finished = true;
-      const w = winner === C.BLACK ? blackSlot().label
-              : winner === C.WHITE ? whiteSlot().label
-              : null;
-      showBanner(w ? `${w} wins (no legal moves for opponent)` : "Draw", w ? null : "info");
-      return true;
+      if (winner === C.BLACK) {
+        showBanner(`${blackSlot().label} wins (no legal moves for opponent)`);
+        return "BLACK";
+      }
+      if (winner === C.WHITE) {
+        showBanner(`${whiteSlot().label} wins (no legal moves for opponent)`);
+        return "WHITE";
+      }
+      showBanner("Draw", "info");
+      return "DRAW";
     }
     if (state.moveCount >= MAX_MOVES) {
       state.finished = true;
       showBanner(`Draw — move cap (${MAX_MOVES})`, "info");
-      return true;
+      return "DRAW";
     }
     const key = C.stateKey(state.board);
     if (state.stateCounts[key] >= 3) {
       state.finished = true;
       showBanner("Draw — threefold repetition", "info");
-      return true;
+      return "DRAW";
     }
-    return false;
+    return null;
   }
 
   // ---- The actual move loop ----
@@ -192,6 +220,8 @@
     const isBlackTurn = state.board.currentPlayer === C.BLACK;
     const net   = isBlackTurn ? blackNet() : whiteNet();
     const slot  = isBlackTurn ? blackSlot() : whiteSlot();
+    // Snapshot the pre-move board so renderAiPlan can replay the PV from it.
+    const preMoveBoard = C.cloneBoard(state.board);
     const result = M.pickMove(state.board, state.depth, net);
     if (!result || !result.move) {
       state.finished = true;
@@ -220,9 +250,154 @@
     log(`${slot.label} (${isBlackTurn ? "B" : "W"}) plays ${describeMove(result.move)} · score ${(result.score >= 0 ? "+" : "") + result.score.toFixed(3)}`);
     render();
     updateEvals();
+    renderAiPlan(preMoveBoard, result.pv || [], slot, isBlackTurn);
 
-    if (checkEnd()) { afterEnd(); return false; }
+    const ended = checkEnd();
+    if (ended) { afterEnd(ended); return false; }
     return true;
+  }
+
+  // ---- AI plan mini-board strip (mirrors play-strong's visual) ----
+  function renderAiPlan(rootBoard, pv, moverSlot, moverWasBlack) {
+    if (!planRow) return;
+    planRow.innerHTML = "";
+    if (!pv || pv.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "plan-empty";
+      empty.textContent = "(no PV from this search)";
+      planRow.appendChild(empty);
+      return;
+    }
+    let board = C.cloneBoard(rootBoard);
+    const cells = [];
+    const limit = Math.min(PLAN_PLIES, pv.length);
+    // Side that moves at each successive ply alternates starting from
+    // moverWasBlack at ply 1.
+    for (let i = 0; i < limit; i++) {
+      const move = pv[i];
+      const plyMoverIsBlack = (i % 2 === 0) ? moverWasBlack : !moverWasBlack;
+      const plyMoverLabel = plyMoverIsBlack
+        ? blackSlot().label + " (B)"
+        : whiteSlot().label + " (W)";
+      const movedTo = move[move.length - 1];
+      board = C.applyMove(board, move);
+      // After the move, currentPlayer flipped. Eval is from the new
+      // side-to-move's perspective; flip to show from the just-moved side.
+      const moverNet = plyMoverIsBlack ? blackNet() : whiteNet();
+      const evalRaw = moverNet ? moverNet.forward(board) : 0;
+      const fromMover = -evalRaw;
+
+      const cell = document.createElement("div");
+      cell.className = "plan-cell";
+
+      const plyNum = document.createElement("div");
+      plyNum.className = "ply-num";
+      plyNum.textContent = "ply " + (i + 1);
+      cell.appendChild(plyNum);
+
+      const cv = document.createElement("canvas");
+      cv.width = PLAN_BOARD_PX;
+      cv.height = PLAN_BOARD_PX;
+      R.drawMini(cv.getContext("2d"), board.squares, {
+        size: PLAN_BOARD_PX,
+        highlightSq: movedTo,
+        pieceScale: 0.30,
+        pieceEdgeWidth: 1.1,
+      });
+      cell.appendChild(cv);
+
+      const actor = document.createElement("div");
+      actor.className = "ply-actor";
+      actor.textContent = plyMoverLabel;
+      cell.appendChild(actor);
+
+      const score = document.createElement("div");
+      score.className = "ply-score";
+      score.textContent = (fromMover >= 0 ? "+" : "") + fromMover.toFixed(2);
+      cell.appendChild(score);
+
+      planRow.appendChild(cell);
+      cells.push(cell);
+    }
+    cells.forEach((cell, i) => {
+      setTimeout(() => cell.classList.add("show"), i * PLAN_REVEAL_MS);
+    });
+  }
+  function clearAiPlan() {
+    if (!planRow) return;
+    planRow.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "plan-empty";
+    empty.textContent = "(starts after the first move)";
+    planRow.appendChild(empty);
+  }
+
+  // ---- Series ----
+  function startGame() {
+    state.board = C.makeBoard();
+    state.moveCount = 0;
+    state.lastFrom = -1;
+    state.lastTo = -1;
+    state.lastCaptured = [];
+    state.stateCounts = Object.create(null);
+    state.finished = false;
+    moveCountEl.textContent = "0";
+    moveHistoryEl.innerHTML = "";
+    showBanner(null);
+    render();
+    updateEvals();
+    clearAiPlan();
+  }
+  function applySwapForGameIdx() {
+    // Game 0: slot-0 black, slot-1 white. Game 1: swap. Game 2: swap back.
+    // This keeps each slot playing both colors equally over a series.
+    const evenIdx = (state.seriesGameIdx % 2 === 0);
+    state.blackSlotIdx = evenIdx ? 0 : 1;
+    state.whiteSlotIdx = evenIdx ? 1 : 0;
+    updateLabels();
+  }
+  function recordGameResult(outcome) {
+    // outcome is "BLACK", "WHITE", or "DRAW". Translate to per-slot tally.
+    const blackIdx = state.blackSlotIdx;
+    const whiteIdx = state.whiteSlotIdx;
+    let summary;
+    if (outcome === "DRAW") {
+      state.tally[blackIdx].d += 1;
+      state.tally[whiteIdx].d += 1;
+      summary = "draw";
+    } else if (outcome === "BLACK") {
+      state.tally[blackIdx].w += 1;
+      state.tally[whiteIdx].l += 1;
+      summary = `${blackSlot().label} wins (B)`;
+    } else {
+      state.tally[whiteIdx].w += 1;
+      state.tally[blackIdx].l += 1;
+      summary = `${whiteSlot().label} wins (W)`;
+    }
+    if (state.seriesActive) {
+      const li = document.createElement("li");
+      li.textContent = `Game ${state.seriesGameIdx + 1}: ${summary} (${state.moveCount} moves)`;
+      seriesLog.appendChild(li);
+      seriesLog.scrollTop = seriesLog.scrollHeight;
+    }
+    refreshTally();
+  }
+  function refreshTally() {
+    function fmt(t) { return `${t.w}W ${t.l}L ${t.d}D`; }
+    seriesTallyA.textContent = fmt(state.tally[0]);
+    seriesTallyB.textContent = fmt(state.tally[1]);
+    tallyLabelA.textContent = SLOTS[0].label;
+    tallyLabelB.textContent = SLOTS[1].label;
+    seriesProgress.textContent =
+      `${Math.min(state.seriesGameIdx + 1, state.seriesTotal)} / ${state.seriesTotal}`;
+  }
+  function clearSeries() {
+    state.seriesActive = false;
+    state.seriesGameIdx = 0;
+    state.seriesTotal = 1;
+    state.tally = { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 } };
+    seriesLog.innerHTML = "";
+    seriesPanel.hidden = true;
   }
 
   function loop() {
@@ -235,19 +410,63 @@
 
   function setPlaying(playing) {
     state.playing = playing;
-    startBtn.disabled = playing || state.finished;
+    startBtn.disabled = playing || (state.finished && !state.seriesActive);
     pauseBtn.disabled = !playing;
     stepBtn.disabled = playing || state.finished;
-    swapBtn.disabled = playing || state.moveCount > 0;  // can't swap mid-game
+    // Can't swap mid-game or mid-series. Outside series, only between games.
+    swapBtn.disabled = playing || state.moveCount > 0 || state.seriesActive;
+    gamesInput.disabled = playing || state.seriesActive;
   }
-  function afterEnd() {
+  function afterEnd(outcome) {
     setPlaying(false);
-    startBtn.disabled = true;
+    if (outcome) recordGameResult(outcome);
+    if (state.seriesActive) {
+      const next = state.seriesGameIdx + 1;
+      if (next < state.seriesTotal) {
+        state.seriesGameIdx = next;
+        log(`Game ${next + 1} of ${state.seriesTotal} starting…`);
+        // Quick pause so the user can read the result, then restart.
+        state.timer = setTimeout(() => {
+          applySwapForGameIdx();
+          startGame();
+          setPlaying(true);
+          loop();
+        }, NEXT_GAME_DELAY_MS);
+      } else {
+        // Series complete.
+        state.seriesActive = false;
+        const a = state.tally[0], b = state.tally[1];
+        log(`Series complete. ${SLOTS[0].label}: ${a.w}-${a.l}-${a.d}, ${SLOTS[1].label}: ${b.w}-${b.l}-${b.d}`);
+        gamesInput.disabled = false;
+        startBtn.disabled = true;
+        swapBtn.disabled = false;
+      }
+    } else {
+      startBtn.disabled = true;
+    }
   }
 
   // ---- Controls ----
   startBtn.addEventListener("click", () => {
-    if (state.finished) return;
+    if (state.finished && !state.seriesActive) return;
+    const total = Math.max(1, Math.min(50, parseInt(gamesInput.value, 10) || 1));
+    state.seriesTotal = total;
+    state.seriesActive = total > 1;
+    if (state.seriesActive) {
+      // Fresh series: reset tally + log + game index, show panel.
+      state.seriesGameIdx = 0;
+      state.tally = { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 } };
+      seriesLog.innerHTML = "";
+      seriesPanel.hidden = false;
+      refreshTally();
+      applySwapForGameIdx();
+      startGame();
+      log(`Game 1 of ${total} starting…`);
+    } else {
+      seriesPanel.hidden = true;
+      // Single game: don't reset board if it's already mid-game and was paused.
+      if (state.finished) startGame();
+    }
     showBanner(null);
     setPlaying(true);
     loop();
@@ -263,23 +482,13 @@
   });
   resetBtn.addEventListener("click", () => {
     if (state.timer) { clearTimeout(state.timer); state.timer = null; }
-    state.board = C.makeBoard();
-    state.moveCount = 0;
-    state.lastFrom = -1;
-    state.lastTo = -1;
-    state.lastCaptured = [];
-    state.stateCounts = Object.create(null);
-    state.finished = false;
-    moveCountEl.textContent = "0";
-    moveHistoryEl.innerHTML = "";
-    showBanner(null);
+    clearSeries();
+    startGame();
     log("Reset. Click Start.");
-    render();
-    updateEvals();
     setPlaying(false);
   });
   swapBtn.addEventListener("click", () => {
-    if (state.playing || state.moveCount > 0) return;
+    if (state.playing || state.moveCount > 0 || state.seriesActive) return;
     [state.blackSlotIdx, state.whiteSlotIdx] = [state.whiteSlotIdx, state.blackSlotIdx];
     updateLabels();
     updateEvals();
@@ -302,6 +511,7 @@
       updateLabels();
       render();
       updateEvals();
+      clearAiPlan();
       log("Ready. Click Start to watch them play.");
       setPlaying(false);
     } catch (err) {

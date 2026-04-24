@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Blondie24 Reborn — Models Match</title>
-<link rel="stylesheet" href="css/style.css?v=18" />
+<link rel="stylesheet" href="css/style.css?v=19" />
 <style>
   /* Match page is a two-column layout — board on the left, controls and
      two side-by-side eval panels on the right. */
@@ -78,9 +78,31 @@
           </select>
         </div>
         <div class="setting-row">
+          <label for="games">Games</label>
+          <input type="number" id="games" min="1" max="50" value="1" step="1" />
+          <span class="setting-val">in series</span>
+        </div>
+        <div class="setting-row">
           <span class="setting-label">Move</span>
           <span id="move-count" class="setting-val">0</span>
         </div>
+      </div>
+
+      <div class="panel" id="series-panel" hidden>
+        <h2>Series</h2>
+        <div class="series-row">
+          <span class="series-label">Game</span>
+          <span id="series-progress" class="series-val">— / —</span>
+        </div>
+        <div class="series-row">
+          <span class="series-label" id="tally-label-a">A</span>
+          <span id="series-tally-a" class="series-val">0W 0L 0D</span>
+        </div>
+        <div class="series-row">
+          <span class="series-label" id="tally-label-b">B</span>
+          <span id="series-tally-b" class="series-val">0W 0L 0D</span>
+        </div>
+        <ol id="series-log" class="series-log" aria-label="Per-game results"></ol>
       </div>
 
       <div class="panel match-eval" id="black-panel">
@@ -121,6 +143,17 @@
         </div>
       </div>
 
+      <div class="panel" id="plan-panel">
+        <h2>Last move's plan</h2>
+        <p class="legend">
+          The side that just moved was searching this 6-ply line at the
+          chosen depth. Each board shows the position after that ply.
+        </p>
+        <div id="plan-row" class="plan-row" aria-live="polite">
+          <div class="plan-empty">(starts after the first move)</div>
+        </div>
+      </div>
+
       <div class="panel" id="history-panel">
         <h2>Move history</h2>
         <ol id="move-history" aria-label="Move history"></ol>
@@ -129,10 +162,10 @@
   </section>
 </main>
 
-<script src="js/checkers.js?v=18"></script>
-<script src="js/render.js?v=18"></script>
-<script src="js/anaconda-network.js?v=18"></script>
-<script src="js/minimax.js?v=18"></script>
-<script src="js/match.js?v=18"></script>
+<script src="js/checkers.js?v=19"></script>
+<script src="js/render.js?v=19"></script>
+<script src="js/anaconda-network.js?v=19"></script>
+<script src="js/minimax.js?v=19"></script>
+<script src="js/match.js?v=19"></script>
 </body>
 </html>

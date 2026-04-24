@@ -618,6 +618,56 @@ body.human-black #pieces-panel .pip-ai  { background: #e8e8e8; border-color: #88
 }
 
 /* ===========================================================
+ * Match page series panel: per-game W/L/D tally + per-game log.
+ * =========================================================== */
+
+#series-panel .series-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+}
+#series-panel .series-row:last-of-type { border-bottom: none; }
+#series-panel .series-label {
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  font-weight: 600;
+}
+#series-panel #tally-label-a,
+#series-panel #tally-label-b {
+  color: var(--accent);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+#series-panel .series-val {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: var(--fg);
+  font-weight: 500;
+}
+#series-panel .series-log {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  max-height: 120px;
+  overflow-y: auto;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  color: var(--dim);
+}
+#series-panel .series-log li {
+  padding: 2px 4px;
+  border-bottom: 1px dotted var(--border);
+}
+#series-panel .series-log li:last-child { border-bottom: none; }
+#series-panel .series-log:empty { display: none; }
+
+/* ===========================================================
  * Match page (match.html / match.js): two-eval-bar AI-vs-AI viewer.
  * Reuses the panel + banner styles from play-strong; adds:
  *  - .setting-row layout for Speed slider + Depth select
