@@ -52,6 +52,7 @@
   const speedLabel     = document.getElementById("speed-label");
   const depthSelect    = document.getElementById("depth");
   const gamesInput     = document.getElementById("games");
+  const randomOpenInput = document.getElementById("random-opening");
   const seriesPanel    = document.getElementById("series-panel");
   const seriesProgress = document.getElementById("series-progress");
   const seriesTallyA   = document.getElementById("series-tally-a");
@@ -87,6 +88,7 @@
     nets: { 0: null, 1: null },   // keyed by slot index, populated on load
     speedMs: parseInt(speedInput.value, 10),
     depth: parseInt(depthSelect.value, 10),
+    randomOpening: parseInt(randomOpenInput.value, 10),
     // Series state. seriesTotal=1 → single game, no series UI shown.
     // For N>1, we track per-slot (not per-color) W/L/D so the tally is
     // attributed to the correct network even as colors swap each game.
@@ -285,8 +287,43 @@
     moveCountEl.textContent = "0";
     moveHistoryEl.innerHTML = "";
     showBanner(null);
+    // Optional random opening: play N random legal plies before the AIs
+    // take over. Without this, deterministic agents from the start
+    // position always produce the exact same game on repeat.
+    if (state.randomOpening > 0) {
+      applyRandomOpening(state.randomOpening);
+    }
     render();
     updateEvals();
+  }
+
+  function applyRandomOpening(plies) {
+    let lastFrom = -1, lastTo = -1, lastCaptured = [];
+    for (let i = 0; i < plies; i++) {
+      const moves = C.getLegalMoves(state.board);
+      const [over] = C.isGameOver(state.board);
+      if (!moves.length || over) {
+        // Random walk dead-ended; bail and let the AI play from here.
+        break;
+      }
+      const move = moves[Math.floor(Math.random() * moves.length)];
+      lastFrom = move[0];
+      lastTo = move[move.length - 1];
+      lastCaptured = [];
+      if (move.length > 2) {
+        for (let j = 1; j < move.length; j += 2) lastCaptured.push(move[j]);
+      }
+      state.board = C.applyMove(state.board, move);
+      const key = C.stateKey(state.board);
+      state.stateCounts[key] = (state.stateCounts[key] || 0) + 1;
+      // Don't increment moveCountEl yet — these aren't AI moves and we
+      // don't want them to count against the 200-move cap (well, they
+      // do, but we don't show them in the move counter so the user sees
+      // "AI moves played" cleanly).
+    }
+    state.lastFrom = lastFrom;
+    state.lastTo = lastTo;
+    state.lastCaptured = lastCaptured;
   }
   function applySwapForGameIdx() {
     // Game 0: slot-0 black, slot-1 white. Game 1: swap. Game 2: swap back.
@@ -453,6 +490,10 @@
   });
   depthSelect.addEventListener("change", () => {
     state.depth = parseInt(depthSelect.value, 10);
+  });
+  randomOpenInput.addEventListener("input", () => {
+    state.randomOpening = Math.max(0, Math.min(20,
+      parseInt(randomOpenInput.value, 10) || 0));
   });
   // Update the Start button label so it's obvious that >1 means a series
   // (otherwise the Games input is too easy to miss).
