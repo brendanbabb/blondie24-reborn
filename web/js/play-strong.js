@@ -34,16 +34,16 @@
     {
       id: "paper-strict",
       label: "Paper-strict",
-      weightsUrl: "weights/anaconda-paper-strict.bin?v=7",
-      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=7",
+      weightsUrl: "weights/anaconda-paper-strict.bin?v=17",
+      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=17",
       available:  true,
     },
     {
       id: "enhanced",
-      label: "Enhanced (not trained yet)",
-      weightsUrl: "weights/anaconda-enhanced.bin?v=7",
-      metaUrl:    "weights/anaconda-enhanced.meta.json?v=7",
-      available:  false,  // flip to true once the .bin is exported
+      label: "Enhanced",
+      weightsUrl: "weights/anaconda-enhanced.bin?v=17",
+      metaUrl:    "weights/anaconda-enhanced.meta.json?v=17",
+      available:  true,
     },
   ];
   const DEFAULT_OPPONENT_ID = "paper-strict";

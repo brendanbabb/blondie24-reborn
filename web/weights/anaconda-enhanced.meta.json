@@ -1,8 +1,8 @@
 {
-  "source": "not trained yet",
+  "source": "checkpoint: best_gen0200.pt (from 1000-gen Enhanced run)",
   "architecture": "Anaconda (2001)",
   "arch_key": "2001",
   "nWeights": 5048,
-  "generations": null,
-  "note": "Slot reserved for the second training run (paper-2001 with asymmetric win-favoring scoring, quiescence on, depth-schedule curriculum). Not yet trained — the dropdown disables this option until the .bin is exported."
+  "generations": 200,
+  "note": "Shipped gen 200 from a paper-2001 + asymmetric-scoring (+2/0/-1) + quiescence-on + depth-curriculum 3->4->5 + max-sigma 0.5 run. Picked by fixture-spread: gen 200 had spread 1.70 across 5 test positions (peak of the run), with healthy weight magnitudes (max |w| 4.2). Beats paper-strict gen 500 (spread 1.66, max |w| 19.5) on both discrimination AND weight stability. Gens 600-700 and 1000 of this run hit transient saturation despite the sigma cap — gen 200 is firmly in the healthy phase."
 }
