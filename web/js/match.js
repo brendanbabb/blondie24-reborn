@@ -59,6 +59,10 @@
   const seriesLog      = document.getElementById("series-log");
   const tallyLabelA    = document.getElementById("tally-label-a");
   const tallyLabelB    = document.getElementById("tally-label-b");
+  const seriesInline   = document.getElementById("series-inline");
+  const inlineProgress = document.getElementById("inline-progress");
+  const inlineTallyA   = document.getElementById("inline-tally-a");
+  const inlineTallyB   = document.getElementById("inline-tally-b");
   const moveCountEl    = document.getElementById("move-count");
   const moveLogEl      = document.getElementById("move-log");
   const moveHistoryEl  = document.getElementById("move-history");
@@ -320,12 +324,19 @@
   }
   function refreshTally() {
     function fmt(t) { return `${t.w}W ${t.l}L ${t.d}D`; }
+    function fmtShort(t) { return `${t.w}-${t.l}-${t.d}`; }
+    // Big-panel labels (used when series complete).
     seriesTallyA.textContent = fmt(state.tally[0]);
     seriesTallyB.textContent = fmt(state.tally[1]);
     tallyLabelA.textContent = SLOTS[0].label;
     tallyLabelB.textContent = SLOTS[1].label;
-    seriesProgress.textContent =
+    const progressStr =
       `${Math.min(state.seriesGameIdx + 1, state.seriesTotal)} / ${state.seriesTotal}`;
+    seriesProgress.textContent = progressStr;
+    // Compact inline live status, always visible during a series.
+    inlineProgress.textContent = `Game ${progressStr}`;
+    inlineTallyA.textContent = `${SLOTS[0].label} ${fmtShort(state.tally[0])}`;
+    inlineTallyB.textContent = `${SLOTS[1].label} ${fmtShort(state.tally[1])}`;
   }
   function clearSeries() {
     state.seriesActive = false;
@@ -334,6 +345,7 @@
     state.tally = { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 } };
     seriesLog.innerHTML = "";
     seriesPanel.hidden = true;
+    seriesInline.hidden = true;
   }
 
   function loop() {
@@ -369,10 +381,11 @@
           loop();
         }, NEXT_GAME_DELAY_MS);
       } else {
-        // Series complete.
+        // Series complete — reveal the big breakdown panel now.
         state.seriesActive = false;
         const a = state.tally[0], b = state.tally[1];
         log(`Series complete. ${SLOTS[0].label}: ${a.w}-${a.l}-${a.d}, ${SLOTS[1].label}: ${b.w}-${b.l}-${b.d}`);
+        seriesPanel.hidden = false;
         gamesInput.disabled = false;
         startBtn.disabled = true;
         swapBtn.disabled = false;
@@ -389,17 +402,22 @@
     state.seriesTotal = total;
     state.seriesActive = total > 1;
     if (state.seriesActive) {
-      // Fresh series: reset tally + log + game index, show panel.
+      // Fresh series: reset tally + log + game index. Show the compact
+      // inline live tally now; the big breakdown panel only appears when
+      // the series finishes (per user preference — keep the side column
+      // uncluttered during play).
       state.seriesGameIdx = 0;
       state.tally = { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 } };
       seriesLog.innerHTML = "";
-      seriesPanel.hidden = false;
+      seriesPanel.hidden = true;
+      seriesInline.hidden = false;
       refreshTally();
       applySwapForGameIdx();
       startGame();
       log(`Game 1 of ${total} starting…`);
     } else {
       seriesPanel.hidden = true;
+      seriesInline.hidden = true;
       // Single game: don't reset board if it's already mid-game and was paused.
       if (state.finished) startGame();
     }

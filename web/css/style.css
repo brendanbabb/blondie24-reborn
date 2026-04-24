@@ -624,6 +624,31 @@ body.human-black #pieces-panel .pip-ai  { background: #e8e8e8; border-color: #88
  * Match page series panel: per-game W/L/D tally + per-game log.
  * =========================================================== */
 
+/* Compact one-line live tally that sits inside the Settings panel
+ * directly below the Games-in-series input. Always visible during
+ * a series; hidden for single games. */
+#settings-panel .series-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  margin: 4px 0 6px;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  color: var(--fg);
+}
+#settings-panel .series-inline > span {
+  white-space: nowrap;
+}
+#settings-panel .series-inline #inline-progress {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 #series-panel .series-row {
   display: flex;
   justify-content: space-between;

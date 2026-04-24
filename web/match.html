@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Blondie24 Reborn — Models Match</title>
-<link rel="stylesheet" href="css/style.css?v=22" />
+<link rel="stylesheet" href="css/style.css?v=23" />
 <style>
   /* Match page is a two-column layout — board on the left, controls and
      two side-by-side eval panels on the right. */
@@ -98,6 +98,13 @@
           <input type="number" id="games" min="1" max="50" value="1" step="1" />
           <span class="setting-val">games (1 = single)</span>
         </div>
+        <div id="series-inline" class="series-inline" hidden>
+          <span id="inline-progress">0/0</span>
+          ·
+          <span id="inline-tally-a">A 0-0-0</span>
+          ·
+          <span id="inline-tally-b">B 0-0-0</span>
+        </div>
         <div class="setting-row">
           <span class="setting-label">Move</span>
           <span id="move-count" class="setting-val">0</span>
@@ -105,9 +112,9 @@
       </div>
 
       <div class="panel" id="series-panel" hidden>
-        <h2>Series</h2>
+        <h2>Series breakdown</h2>
         <div class="series-row">
-          <span class="series-label">Game</span>
+          <span class="series-label">Final</span>
           <span id="series-progress" class="series-val">— / —</span>
         </div>
         <div class="series-row">
@@ -167,10 +174,10 @@
   </section>
 </main>
 
-<script src="js/checkers.js?v=22"></script>
-<script src="js/render.js?v=22"></script>
-<script src="js/anaconda-network.js?v=22"></script>
-<script src="js/minimax.js?v=22"></script>
-<script src="js/match.js?v=22"></script>
+<script src="js/checkers.js?v=23"></script>
+<script src="js/render.js?v=23"></script>
+<script src="js/anaconda-network.js?v=23"></script>
+<script src="js/minimax.js?v=23"></script>
+<script src="js/match.js?v=23"></script>
 </body>
 </html>
