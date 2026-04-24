@@ -113,6 +113,25 @@
       lastTo: state.lastTo,
       captured: state.lastCaptured,
     });
+    updatePieceCounts();
+  }
+
+  function updatePieceCounts() {
+    const sq = state.board.squares;
+    let bMen = 0, bKings = 0, wMen = 0, wKings = 0;
+    for (let i = 0; i < 32; i++) {
+      const p = sq[i];
+      if (p === C.BLACK_PIECE) bMen++;
+      else if (p === C.BLACK_KING) bKings++;
+      else if (p === C.WHITE_PIECE) wMen++;
+      else if (p === C.WHITE_KING) wKings++;
+    }
+    document.getElementById("count-black").textContent = String(bMen + bKings);
+    document.getElementById("kings-black").textContent = String(bKings);
+    document.getElementById("count-white").textContent = String(wMen + wKings);
+    document.getElementById("kings-white").textContent = String(wKings);
+    document.getElementById("piece-row-black").classList.toggle("low", (bMen + bKings) <= 3);
+    document.getElementById("piece-row-white").classList.toggle("low", (wMen + wKings) <= 3);
   }
 
   function updateLabels() {

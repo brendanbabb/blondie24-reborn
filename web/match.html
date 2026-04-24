@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Blondie24 Reborn — Models Match</title>
-<link rel="stylesheet" href="css/style.css?v=20" />
+<link rel="stylesheet" href="css/style.css?v=21" />
 <style>
   /* Match page is a two-column layout — board on the left, controls and
      two side-by-side eval panels on the right. */
@@ -61,6 +61,22 @@
     </div>
 
     <aside id="side-panel">
+      <div class="panel" id="pieces-panel">
+        <h2>Pieces</h2>
+        <div class="piece-row" id="piece-row-black">
+          <span class="pip pip-black"></span>
+          <span class="who">Black</span>
+          <span class="count"><span id="count-black">12</span><span class="unit">pcs</span></span>
+          <span class="kings"><span id="kings-black">0</span><span class="unit">kings</span></span>
+        </div>
+        <div class="piece-row" id="piece-row-white">
+          <span class="pip pip-white"></span>
+          <span class="who">White</span>
+          <span class="count"><span id="count-white">12</span><span class="unit">pcs</span></span>
+          <span class="kings"><span id="kings-white">0</span><span class="unit">kings</span></span>
+        </div>
+      </div>
+
       <div class="panel" id="settings-panel">
         <h2>Settings</h2>
         <div class="setting-row">
@@ -151,10 +167,10 @@
   </section>
 </main>
 
-<script src="js/checkers.js?v=20"></script>
-<script src="js/render.js?v=20"></script>
-<script src="js/anaconda-network.js?v=20"></script>
-<script src="js/minimax.js?v=20"></script>
-<script src="js/match.js?v=20"></script>
+<script src="js/checkers.js?v=21"></script>
+<script src="js/render.js?v=21"></script>
+<script src="js/anaconda-network.js?v=21"></script>
+<script src="js/minimax.js?v=21"></script>
+<script src="js/match.js?v=21"></script>
 </body>
 </html>
