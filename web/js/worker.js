@@ -64,8 +64,10 @@ function makeIndividual(weights, sigmas) {
 function initPopulation() {
   population = [];
   for (let i = 0; i < POP_SIZE; i++) {
+    // Paper-faithful σ=0.05 for both weights and sigma-state — matches
+    // network.js's own default and Chellapilla & Fogel 1999.
     population.push(makeIndividual(
-      N.newRandomWeights(0.1),
+      N.newRandomWeights(0.05),
       N.newSigmas(0.05),
     ));
   }
