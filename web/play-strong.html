@@ -116,6 +116,10 @@
         <h2>Opponent</h2>
         <div class="stat"><span class="label">Architecture</span><span id="arch-label">Anaconda (2001)</span></div>
         <div class="stat"><span class="label">Evolvable weights</span><span id="weights-label">—</span></div>
+        <div class="stat" title="Evolvable king weight K — the scalar that scales king squares (±K instead of ±1) in this network's input encoding. Paper-initialized K=2.0.">
+          <span class="label">King weight K</span>
+          <span id="king-label">—</span>
+        </div>
         <div class="stat"><span class="label">Training source</span><span id="training-label">—</span></div>
         <div class="stat"><span class="label">Search depth</span><span id="depth-label">6 plies</span></div>
         <div class="stat"><span class="label">AI think time</span><span id="think-time">—</span></div>
@@ -373,17 +377,37 @@
             </g>
             <text x="160" y="378" text-anchor="middle" fill="#8a95a7" font-size="9">scalar in [−1, +1] (tanh)</text>
 
-            <!-- Piece-diff and king bypasses (yellow arrows around the MLP) -->
+            <!-- Piece-diff bypass (yellow arrow around the RIGHT of the MLP):
+                 skips the hidden layers and adds a direct linear term
+                 (piece_diff_weight × sum-of-inputs) to the final pre-tanh. -->
             <path d="M 282 58 Q 312 58 312 200 Q 312 360 192 365"
                   fill="none" stroke="#f3c14a" stroke-width="1.2"
                   stroke-dasharray="3,3" opacity="0.7"
                   marker-end="url(#arrow-bypass)"/>
-            <text x="316" y="200" fill="#f3c14a" font-size="9" transform="rotate(-90 316,200)" text-anchor="middle">piece-diff &amp; king bypass</text>
+            <text x="316" y="200" fill="#f3c14a" font-size="9" transform="rotate(-90 316,200)" text-anchor="middle">piece-diff bypass</text>
+
+            <!-- King weight (left side). NOT a bypass — it scales king squares
+                 (±K instead of ±1) inside the board-to-input encoding BEFORE
+                 the sub-board filters see anything. Drawn as a chip with a
+                 short arrow INTO the board, distinct from the piece-diff
+                 bypass that exits TO the output. -->
+            <g transform="translate(74,58)">
+              <rect x="-18" y="-8" width="36" height="16" rx="5"
+                    fill="#f3c14a" opacity="0.92" stroke="#1a1410" stroke-width="0.8"/>
+              <text id="arch-king-label" x="0" y="3.5" fill="#1a1410" font-size="9" font-weight="700" text-anchor="middle">K=2.00</text>
+            </g>
+            <path d="M 92 58 L 120 58" fill="none" stroke="#f3c14a"
+                  stroke-width="1.2" stroke-dasharray="3,3" opacity="0.7"
+                  marker-end="url(#arrow-bypass)"/>
+            <text x="74" y="80" text-anchor="middle" fill="#f3c14a" font-size="8">king-weight → input encoding</text>
           </g>
         </svg>
         <p class="legend dim" style="margin-top: 6px">
-          Total <b>5,048</b> evolvable weights, all initialized from N(0, 0.05) and
-          tuned by evolutionary programming (no backprop, no gradient descent).
+          Total <b>5,048</b> evolvable weights (includes the
+          <b style="color:#f3c14a">king weight K</b> — an evolvable scalar that
+          scales king squares to ±K in the input encoding, paper-initialized
+          K=2.0). All initialized from N(0, 0.05) and tuned by evolutionary
+          programming — no backprop, no gradient descent.
         </p>
       </div>
     </aside>
@@ -391,10 +415,10 @@
 
 </main>
 
-<script src="js/checkers.js?v=19"></script>
-<script src="js/render.js?v=19"></script>
-<script src="js/anaconda-network.js?v=19"></script>
-<script src="js/minimax.js?v=19"></script>
-<script src="js/play-strong.js?v=19"></script>
+<script src="js/checkers.js?v=20"></script>
+<script src="js/render.js?v=20"></script>
+<script src="js/anaconda-network.js?v=20"></script>
+<script src="js/minimax.js?v=20"></script>
+<script src="js/play-strong.js?v=20"></script>
 </body>
 </html>

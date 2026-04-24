@@ -22,7 +22,7 @@
  * (pause/snapshot requests) between gens.
  */
 
-importScripts("checkers.js?v=6", "network.js?v=6", "minimax.js?v=6");
+importScripts("checkers.js?v=7", "network.js?v=7", "minimax.js?v=7");
 
 const C = self.Checkers;
 const N = self.Network;

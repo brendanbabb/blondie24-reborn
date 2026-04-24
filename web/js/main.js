@@ -76,7 +76,7 @@
 
   // ---- Worker setup ---------------------------------------------------------
 
-  const worker = new Worker("js/worker.js?v=6");
+  const worker = new Worker("js/worker.js?v=7");
   let pendingSnapshot = null;  // Promise resolver while a snapshot is in flight
 
   worker.onerror = (ev) => {
@@ -379,7 +379,9 @@
     // centroid to the output, labeled, so the paper's "material signal" is
     // visible at a glance.
     const OFF_PIECE_DIFF = OFF_W3 + 10 + 1; // past W3 + b3
+    const OFF_KING = OFF_PIECE_DIFF + 1;
     const pd = weights[OFF_PIECE_DIFF];
+    const king = weights[OFF_KING];
     const pdA = Math.min(1, Math.abs(pd) / 0.5);
     g.beginPath();
     g.moveTo(LAYERS[0].x + 4, H / 2);
@@ -404,6 +406,55 @@
       }
     }
 
+    // King-weight chip — scales king squares (±K) in the input encoding.
+    // Not an edge between layers; it re-scales the 32 input values before
+    // the first matmul. Drawn as a small pill tucked to the left of the
+    // input column so viewers can see it drift with evolution (paper-init
+    // K=2.0, bounded by selection near [1.5, 2.5] in typical runs).
+    const kingPillX = LAYERS[0].x - 22;
+    const kingPillY = H / 2;
+    const kingPillW = 36;
+    const kingPillH = 15;
+    g.save();
+    g.translate(kingPillX, kingPillY);
+    // Intensity: strongest color at K ≈ 2, fading toward the [1, 3] clamps.
+    const kClamped = Math.max(1, Math.min(3, king));
+    const kIntensity = 0.35 + 0.55 * (1 - Math.abs(kClamped - 2) / 1);
+    g.fillStyle = `rgba(243, 193, 74, ${kIntensity.toFixed(3)})`;
+    const pillX = -kingPillW / 2, pillY = -kingPillH / 2;
+    const pillR = 6;
+    g.beginPath();
+    g.moveTo(pillX + pillR, pillY);
+    g.lineTo(pillX + kingPillW - pillR, pillY);
+    g.arcTo(pillX + kingPillW, pillY, pillX + kingPillW, pillY + pillR, pillR);
+    g.lineTo(pillX + kingPillW, pillY + kingPillH - pillR);
+    g.arcTo(pillX + kingPillW, pillY + kingPillH, pillX + kingPillW - pillR, pillY + kingPillH, pillR);
+    g.lineTo(pillX + pillR, pillY + kingPillH);
+    g.arcTo(pillX, pillY + kingPillH, pillX, pillY + kingPillH - pillR, pillR);
+    g.lineTo(pillX, pillY + pillR);
+    g.arcTo(pillX, pillY, pillX + pillR, pillY, pillR);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = "rgba(26, 20, 16, 0.8)";
+    g.lineWidth = 1;
+    g.stroke();
+    g.fillStyle = "#1a1410";
+    g.font = "bold 9px -apple-system, Segoe UI, sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText(`K=${king.toFixed(2)}`, 0, 0);
+    g.restore();
+    // Faint tick line from the chip into the input column so the viewer
+    // reads "this multiplies the inputs" rather than "floating free".
+    g.strokeStyle = "rgba(243, 193, 74, 0.45)";
+    g.lineWidth = 1;
+    g.setLineDash([2, 2]);
+    g.beginPath();
+    g.moveTo(kingPillX + kingPillW / 2, kingPillY);
+    g.lineTo(LAYERS[0].x - 4, kingPillY);
+    g.stroke();
+    g.setLineDash([]);
+
     // Column labels.
     g.fillStyle = "rgba(200,210,225,0.75)";
     g.font = "10px -apple-system, Segoe UI, sans-serif";
@@ -415,7 +466,7 @@
     g.textAlign = "start";
 
     document.getElementById("layers-caption").textContent =
-      `gen ${gen} · 3 dense layers + piece-diff bypass · top-40 edges drawn per slab`;
+      `gen ${gen} · 3 dense layers + piece-diff bypass · K=${king.toFixed(2)} scales king squares · top-40 edges per slab`;
   }
 
   function appendMoveHistory(actor, move, captured, extra) {
@@ -491,6 +542,8 @@
     document.getElementById("gen-counter").textContent = "gen 0";
     document.getElementById("gen-delta").textContent = "+0 this turn";
     document.getElementById("gens-per-sec").textContent = "—";
+    const kingEl = document.getElementById("king-weight");
+    if (kingEl) kingEl.textContent = "—";
     updatePosEval();
     updateAiTimeDisplay();
 
@@ -788,6 +841,11 @@
       state.aiNet = N.makeNetwork(snap.weights);
       log(`AI is moving (gen ${snap.gen})…`);
       renderLayeredNetwork(snap.gen, snap.weights);
+      // King weight is the last slot in the flat weights vector. Surfaces
+      // the evolved K value in the Training panel so the user can watch
+      // it drift off its paper-init K=2.0 under self-adaptive σ mutation.
+      const kingEl = document.getElementById("king-weight");
+      if (kingEl) kingEl.textContent = snap.weights[snap.weights.length - 1].toFixed(3);
       updatePosEval();
       const searchStart = performance.now();
       const result = M.pickMove(state.board, AI_DEPTH, state.aiNet);

@@ -99,6 +99,10 @@
           <span class="label">AI moves made</span>
           <span id="ai-move-count">0</span>
         </div>
+        <div class="stat" title="Evolvable king weight K — scales king squares (±K instead of ±1) in the input encoding. Paper-initialized K=2.0, drifts under self-adaptive σ mutation.">
+          <span class="label">King weight K</span>
+          <span id="king-weight">—</span>
+        </div>
       </div>
 
       <div class="panel" id="eval-panel">
@@ -173,7 +177,10 @@
           <b>32</b> input squares → <b>40</b> → <b>10</b> → <b>1</b> output.
           The <b>40 strongest</b> connections per layer are drawn, colored by
           sign (<b style="color:#ff9a8a">red</b> negative,
-          <b style="color:#7fb8ff">blue</b> positive).
+          <b style="color:#7fb8ff">blue</b> positive). The
+          <b style="color:#f3c14a">gold K chip</b> to the left of the input column
+          is the evolvable king weight — it scales king squares (±K instead of ±1)
+          in the input encoding before the first matmul. Watch K drift with evolution.
         </p>
         <canvas id="layers" width="340" height="240"></canvas>
         <p class="dim" id="layers-caption" style="margin: 6px 0 0; text-align: center;">
@@ -187,10 +194,10 @@
 
 </main>
 
-<script src="js/checkers.js?v=6"></script>
-<script src="js/render.js?v=6"></script>
-<script src="js/network.js?v=6"></script>
-<script src="js/minimax.js?v=6"></script>
-<script src="js/main.js?v=6"></script>
+<script src="js/checkers.js?v=7"></script>
+<script src="js/render.js?v=7"></script>
+<script src="js/network.js?v=7"></script>
+<script src="js/minimax.js?v=7"></script>
+<script src="js/main.js?v=7"></script>
 </body>
 </html>

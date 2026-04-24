@@ -34,15 +34,15 @@
     {
       id: "paper-strict",
       label: "Paper-strict",
-      weightsUrl: "weights/anaconda-paper-strict.bin?v=17",
-      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=17",
+      weightsUrl: "weights/anaconda-paper-strict.bin?v=20",
+      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=20",
       available:  true,
     },
     {
       id: "enhanced",
       label: "Enhanced",
-      weightsUrl: "weights/anaconda-enhanced.bin?v=17",
-      metaUrl:    "weights/anaconda-enhanced.meta.json?v=17",
+      weightsUrl: "weights/anaconda-enhanced.bin?v=20",
+      metaUrl:    "weights/anaconda-enhanced.meta.json?v=20",
       available:  true,
     },
   ];
@@ -117,6 +117,8 @@
 
     document.getElementById("weights-label").textContent = "loading…";
     document.getElementById("training-label").textContent = "loading…";
+    const kingLabelEl = document.getElementById("king-label");
+    if (kingLabelEl) kingLabelEl.textContent = "—";
     try {
       const [weights, metaResp] = await Promise.all([
         A.loadWeightsFromUrl(opp.weightsUrl),
@@ -125,6 +127,13 @@
       state.aiNet = A.makeNetwork(weights);
       state.netReady = true;
       document.getElementById("weights-label").textContent = String(weights.length);
+      // King weight is the last slot in the flat vector (AnacondaNetwork.N_WEIGHTS - 1).
+      // Surface it in the info panel and repaint the architecture-diagram chip.
+      const kingVal = state.aiNet.getKingWeight();
+      const kingLabel = document.getElementById("king-label");
+      if (kingLabel) kingLabel.textContent = kingVal.toFixed(3);
+      const archKingLabel = document.getElementById("arch-king-label");
+      if (archKingLabel) archKingLabel.textContent = "K=" + kingVal.toFixed(2);
       if (metaResp) {
         const gens = metaResp.generations;
         const src = metaResp.source || "unknown";
