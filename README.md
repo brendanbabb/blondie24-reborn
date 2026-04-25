@@ -178,12 +178,22 @@ opponent slots, picked from a dropdown:
   (asymmetric win-favoring scoring, quiescence on, optional depth-schedule curriculum)
   intended to break out of the paper-strict draw plateau.
 
-Both slots ship with real trained weights — see each slot's `.meta.json` sidecar for the
-exact checkpoint and training recipe. The currently-shipped paper-strict is gen 500 from a
-2000-gen run (gen 850+ saturated under unbounded σ and was unusable); the Enhanced is
-**gen 270** from the two-phase paper-2001 base (to gen 240) plus a 30-gen d7/d8 finishing
-curriculum. Gen 270 beats the previous shipped Enhanced (gen 240) by +9 tournament points
-over a 150-game head-to-head at depth 6 (24W/15L/111D; 62% decisive-game win rate).
+All three slots ship with real trained weights — see each slot's `.meta.json` sidecar for
+the exact checkpoint and training recipe.
+
+- **Paper-strict** (`anaconda-paper-strict.bin`) — gen 500 from a 2000-gen run (gen 850+
+  saturated under unbounded σ and was unusable).
+- **Enhanced** (`anaconda-enhanced.bin`) — **gen 270**, the two-phase paper-2001 base
+  (through gen 240) plus a 30-gen d7/d8 finishing curriculum. Beats the previous shipped
+  Enhanced (gen 240) by +9 tournament points over a 150-game head-to-head at depth 6
+  (24W/15L/111D; 62% decisive-game win rate).
+- **Risky** (`anaconda-risky.bin`) — **gen 285**, resumed from Enhanced gen 270 with a
+  synthetic pop-50 seed and trained 15 gens at depth 8, **quiescence off**, with
+  aggressive +3/0/-1 asymmetric scoring (wins worth 3× vs losses worth -1). The scoring
+  reshapes selection toward decisive play instead of draw-shuffling. Head-to-head vs
+  Enhanced (50 games d6): 6W/11L/33D — loses overall (+5 for Enhanced) but produces a
+  **34% decisive-game rate** vs the usual 20–26%. Pair it with Paper-strict on the match
+  page for the most exciting games.
 
 To retrain paper-strict from scratch and re-ship it:
 

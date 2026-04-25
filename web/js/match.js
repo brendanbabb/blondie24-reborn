@@ -25,14 +25,20 @@
     {
       id: "paper-strict",
       label: "Paper-strict",
-      weightsUrl: "weights/anaconda-paper-strict.bin?v=27",
-      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=27",
+      weightsUrl: "weights/anaconda-paper-strict.bin?v=28",
+      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=28",
     },
     {
       id: "enhanced",
       label: "Enhanced",
-      weightsUrl: "weights/anaconda-enhanced.bin?v=27",
-      metaUrl:    "weights/anaconda-enhanced.meta.json?v=27",
+      weightsUrl: "weights/anaconda-enhanced.bin?v=28",
+      metaUrl:    "weights/anaconda-enhanced.meta.json?v=28",
+    },
+    {
+      id: "risky",
+      label: "Risky",
+      weightsUrl: "weights/anaconda-risky.bin?v=28",
+      metaUrl:    "weights/anaconda-risky.meta.json?v=28",
     },
   ];
   const MAX_MOVES = 200;
@@ -70,6 +76,8 @@
   const bannerEl       = document.getElementById("status-banner");
   const blackNameEl    = document.getElementById("black-name");
   const whiteNameEl    = document.getElementById("white-name");
+  const blackOppSel    = document.getElementById("black-opp");
+  const whiteOppSel    = document.getElementById("white-opp");
 
   // ---- State ----
   // Slot-0 is black by default, slot-1 is white. Swap toggles them.
@@ -97,7 +105,13 @@
     seriesTotal: 1,
     seriesGameIdx: 0,
     seriesActive: false,
-    tally: { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 } },
+    // Pair that kicked off the current series — so mid-series color swaps
+    // alternate WITHIN the selected pair instead of resetting to slot-0/slot-1.
+    seriesBlackSlotIdx: 0,
+    seriesWhiteSlotIdx: 1,
+    // Tally is keyed by SLOTS index — 0,1,2. Expanded to cover all three
+    // possible opponents; only the two currently playing accumulate scores.
+    tally: { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 }, 2: { w: 0, l: 0, d: 0 } },
   };
 
   // ---- Helpers ----
@@ -422,11 +436,13 @@
     state.lastCaptured = lastCaptured;
   }
   function applySwapForGameIdx() {
-    // Game 0: slot-0 black, slot-1 white. Game 1: swap. Game 2: swap back.
-    // This keeps each slot playing both colors equally over a series.
+    // Preserve the pair chosen when the series started; just alternate which
+    // of the two plays Black each game so colors balance over the series.
     const evenIdx = (state.seriesGameIdx % 2 === 0);
-    state.blackSlotIdx = evenIdx ? 0 : 1;
-    state.whiteSlotIdx = evenIdx ? 1 : 0;
+    const a = state.seriesBlackSlotIdx;
+    const b = state.seriesWhiteSlotIdx;
+    state.blackSlotIdx = evenIdx ? a : b;
+    state.whiteSlotIdx = evenIdx ? b : a;
     updateLabels();
   }
   function recordGameResult(outcome) {
@@ -462,24 +478,28 @@
   function refreshTally() {
     function fmt(t) { return `${t.w}W ${t.l}L ${t.d}D`; }
     function fmtShort(t) { return `${t.w}-${t.l}-${t.d}`; }
-    // Big-panel labels (used when series complete).
-    seriesTallyA.textContent = fmt(state.tally[0]);
-    seriesTallyB.textContent = fmt(state.tally[1]);
-    tallyLabelA.textContent = SLOTS[0].label;
-    tallyLabelB.textContent = SLOTS[1].label;
+    // Show the tally for the two slots actually in this series/game (pair
+    // anchored by seriesBlack/WhiteSlotIdx when active, otherwise the
+    // currently-selected pair).
+    const aIdx = state.seriesActive ? state.seriesBlackSlotIdx : state.blackSlotIdx;
+    const bIdx = state.seriesActive ? state.seriesWhiteSlotIdx : state.whiteSlotIdx;
+    seriesTallyA.textContent = fmt(state.tally[aIdx]);
+    seriesTallyB.textContent = fmt(state.tally[bIdx]);
+    tallyLabelA.textContent = SLOTS[aIdx].label;
+    tallyLabelB.textContent = SLOTS[bIdx].label;
     const progressStr =
       `${Math.min(state.seriesGameIdx + 1, state.seriesTotal)} / ${state.seriesTotal}`;
     seriesProgress.textContent = progressStr;
     // Compact inline live status, always visible during a series.
     inlineProgress.textContent = `Game ${progressStr}`;
-    inlineTallyA.textContent = `${SLOTS[0].label} ${fmtShort(state.tally[0])}`;
-    inlineTallyB.textContent = `${SLOTS[1].label} ${fmtShort(state.tally[1])}`;
+    inlineTallyA.textContent = `${SLOTS[aIdx].label} ${fmtShort(state.tally[aIdx])}`;
+    inlineTallyB.textContent = `${SLOTS[bIdx].label} ${fmtShort(state.tally[bIdx])}`;
   }
   function clearSeries() {
     state.seriesActive = false;
     state.seriesGameIdx = 0;
     state.seriesTotal = 1;
-    state.tally = { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 } };
+    state.tally = { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 }, 2: { w: 0, l: 0, d: 0 } };
     seriesLog.innerHTML = "";
     seriesPanel.hidden = true;
     seriesInline.hidden = true;
@@ -544,7 +564,12 @@
       // the series finishes (per user preference — keep the side column
       // uncluttered during play).
       state.seriesGameIdx = 0;
-      state.tally = { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 } };
+      state.tally = { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 }, 2: { w: 0, l: 0, d: 0 } };
+      // Freeze the pair that kicks off this series — applySwapForGameIdx
+      // alternates colors between these two across the series without
+      // ever swapping in a third slot.
+      state.seriesBlackSlotIdx = state.blackSlotIdx;
+      state.seriesWhiteSlotIdx = state.whiteSlotIdx;
       seriesLog.innerHTML = "";
       seriesPanel.hidden = true;
       seriesInline.hidden = false;
@@ -581,6 +606,8 @@
   swapBtn.addEventListener("click", () => {
     if (state.playing || state.moveCount > 0 || state.seriesActive) return;
     [state.blackSlotIdx, state.whiteSlotIdx] = [state.whiteSlotIdx, state.blackSlotIdx];
+    if (blackOppSel) blackOppSel.value = String(state.blackSlotIdx);
+    if (whiteOppSel) whiteOppSel.value = String(state.whiteSlotIdx);
     updateLabels();
     updateEvals();
   });
@@ -605,13 +632,51 @@
   gamesInput.addEventListener("input", refreshStartLabel);
   refreshStartLabel();
 
+  // Populate the opponent dropdowns from SLOTS. Disable mid-game to prevent
+  // swapping out a network while it's thinking. Changing a dropdown while
+  // idle mirrors the Swap button — it just reassigns the color's slot and
+  // repaints labels/evals; no reload needed (all SLOTS networks preload on
+  // boot).
+  function populateOppDropdowns() {
+    for (const sel of [blackOppSel, whiteOppSel]) {
+      sel.innerHTML = "";
+      SLOTS.forEach((s, i) => {
+        const opt = document.createElement("option");
+        opt.value = String(i);
+        opt.textContent = s.label;
+        sel.appendChild(opt);
+      });
+    }
+    blackOppSel.value = String(state.blackSlotIdx);
+    whiteOppSel.value = String(state.whiteSlotIdx);
+  }
+  blackOppSel.addEventListener("change", () => {
+    if (state.playing || state.seriesActive || state.moveCount > 0) {
+      // Revert — can't change mid-play.
+      blackOppSel.value = String(state.blackSlotIdx);
+      return;
+    }
+    state.blackSlotIdx = parseInt(blackOppSel.value, 10);
+    updateLabels();
+    updateEvals();
+  });
+  whiteOppSel.addEventListener("change", () => {
+    if (state.playing || state.seriesActive || state.moveCount > 0) {
+      whiteOppSel.value = String(state.whiteSlotIdx);
+      return;
+    }
+    state.whiteSlotIdx = parseInt(whiteOppSel.value, 10);
+    updateLabels();
+    updateEvals();
+  });
+
   // ---- Boot ----
   async function loadAll() {
     log("Loading networks…");
     try {
       const weights = await Promise.all(SLOTS.map(s => A.loadWeightsFromUrl(s.weightsUrl)));
-      state.nets[0] = A.makeNetwork(weights[0]);
-      state.nets[1] = A.makeNetwork(weights[1]);
+      SLOTS.forEach((_, i) => { state.nets[i] = A.makeNetwork(weights[i]); });
+      populateOppDropdowns();
       updateLabels();
       render();
       updateEvals();

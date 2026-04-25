@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Blondie24 Reborn — Models Match</title>
-<link rel="stylesheet" href="css/style.css?v=27" />
+<link rel="stylesheet" href="css/style.css?v=28" />
 <style>
   /* Match page is a two-column layout — board on the left, controls and
      two side-by-side eval panels on the right. */
@@ -31,11 +31,15 @@
     <details id="about">
       <summary>What am I looking at?</summary>
       <p>
-        Both <b>Paper-strict</b> and <b>Enhanced</b> Anaconda networks are
-        loaded and play each other at the chosen depth. Each side's
-        evaluation of the current position is shown so you can see when
-        they disagree about who's ahead — that's where the strength gap
-        lives.
+        Three Anaconda networks are loaded — <b>Paper-strict</b>,
+        <b>Enhanced</b>, and <b>Risky</b> — and any two can play each other
+        at the chosen depth. Pick Black and White from the dropdowns in the
+        Settings panel. Each side's evaluation of the current position is
+        shown so you can see when they disagree about who's ahead — that's
+        where the strength gap lives. <b>Risky</b> is a
+        +3/0/-1-scored, quiescence-off variant that plays for decisive
+        wins (and sometimes loses trying); pairing it with <b>Paper-strict</b>
+        produces the most decisive games of any matchup.
       </p>
       <p>
         Default depth is 4 to keep the per-move search snappy. Crank it up
@@ -101,6 +105,14 @@
 
       <div class="panel" id="settings-panel">
         <h2>Settings</h2>
+        <div class="setting-row">
+          <label for="black-opp">Black</label>
+          <select id="black-opp"></select>
+        </div>
+        <div class="setting-row">
+          <label for="white-opp">White</label>
+          <select id="white-opp"></select>
+        </div>
         <div class="setting-row">
           <label for="speed">Speed</label>
           <input type="range" id="speed" min="200" max="3000" step="100" value="900" />
@@ -201,10 +213,10 @@
   </section>
 </main>
 
-<script src="js/checkers.js?v=27"></script>
-<script src="js/render.js?v=27"></script>
-<script src="js/anaconda-network.js?v=27"></script>
-<script src="js/minimax.js?v=27"></script>
-<script src="js/match.js?v=27"></script>
+<script src="js/checkers.js?v=28"></script>
+<script src="js/render.js?v=28"></script>
+<script src="js/anaconda-network.js?v=28"></script>
+<script src="js/minimax.js?v=28"></script>
+<script src="js/match.js?v=28"></script>
 </body>
 </html>
