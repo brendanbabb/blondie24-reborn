@@ -1,8 +1,8 @@
 {
-  "source": "checkpoint: best_gen0285.pt (gen 270 shipped Enhanced + 15-gen risky finishing, pop 50)",
+  "source": "checkpoint: best_gen0380.pt (Risky-1 gen 285 + 95 gens d7 no-q +3/-1, pop 50)",
   "architecture": "Anaconda (2001)",
   "arch_key": "2001",
   "nWeights": 5048,
-  "generations": 285,
-  "note": "Risky/entertainment-focused variant of Enhanced. Training recipe: resumed from gen 270 (shipped Enhanced) with a synthetic 50-clone pop-50 seed; trained 15 gens at depth 8 with aggressive +3.0/0.0/-1.0 asymmetric scoring (wins worth 3x, losses only -1), quiescence OFF (plain alpha-beta), max-sigma 1.0. The risky scoring incentivizes winning attempts even at the cost of occasional losses, producing a model that plays for decisive outcomes instead of draw-shuffling. 50-game head-to-head vs shipped Enhanced at depth 6 RO=8: 6W/11L/33D (Enhanced +5) — 34% decisive-game rate, best measured (vs typical 20-26% between conservative models). Loses more than it wins vs Enhanced, but produces far more exciting games with fewer shuffle-draws."
+  "generations": 380,
+  "note": "Risky-2 — second-generation risky/entertainment-focused variant. Resumed from the previous shipped Risky (gen 285) with a synthetic pop-50 seed and trained 95 more gens at depth 7, quiescence OFF, max-sigma 1.0, asymmetric +3.0/0.0/-1.0 scoring. Run hit a peak best fitness of +24 at gen 378 (one individual: 8W/0L/4D — the strongest single-gen result across all training runs). Gen 380 (the closest checkpoint to that peak) ships here. Head-to-head vs the previous Risky (gen 285), 50 games d6 RO=8 seed=42: 13W/4L/33D — gen 380 beats Risky-1 by +9 tournament points while preserving the 34% decisive-game rate that defines the Risky play style. Final king weight K=1.59."
 }

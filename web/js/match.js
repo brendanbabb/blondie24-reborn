@@ -25,20 +25,20 @@
     {
       id: "paper-strict",
       label: "Paper-strict",
-      weightsUrl: "weights/anaconda-paper-strict.bin?v=28",
-      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=28",
+      weightsUrl: "weights/anaconda-paper-strict.bin?v=31",
+      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=31",
     },
     {
       id: "enhanced",
       label: "Enhanced",
-      weightsUrl: "weights/anaconda-enhanced.bin?v=28",
-      metaUrl:    "weights/anaconda-enhanced.meta.json?v=28",
+      weightsUrl: "weights/anaconda-enhanced.bin?v=31",
+      metaUrl:    "weights/anaconda-enhanced.meta.json?v=31",
     },
     {
       id: "risky",
       label: "Risky",
-      weightsUrl: "weights/anaconda-risky.bin?v=28",
-      metaUrl:    "weights/anaconda-risky.meta.json?v=28",
+      weightsUrl: "weights/anaconda-risky.bin?v=31",
+      metaUrl:    "weights/anaconda-risky.meta.json?v=31",
     },
   ];
   const MAX_MOVES = 200;

@@ -187,13 +187,15 @@ the exact checkpoint and training recipe.
   (through gen 240) plus a 30-gen d7/d8 finishing curriculum. Beats the previous shipped
   Enhanced (gen 240) by +9 tournament points over a 150-game head-to-head at depth 6
   (24W/15L/111D; 62% decisive-game win rate).
-- **Risky** (`anaconda-risky.bin`) — **gen 285**, resumed from Enhanced gen 270 with a
-  synthetic pop-50 seed and trained 15 gens at depth 8, **quiescence off**, with
-  aggressive +3/0/-1 asymmetric scoring (wins worth 3× vs losses worth -1). The scoring
-  reshapes selection toward decisive play instead of draw-shuffling. Head-to-head vs
-  Enhanced (50 games d6): 6W/11L/33D — loses overall (+5 for Enhanced) but produces a
-  **34% decisive-game rate** vs the usual 20–26%. Pair it with Paper-strict on the match
-  page for the most exciting games.
+- **Risky** (`anaconda-risky.bin`) — **gen 380**. Trained in two phases: (1) Enhanced
+  gen 270 + 15 gens at depth 8, quiescence off, with aggressive +3/0/-1 scoring and a
+  synthetic pop-50 seed → gen 285; (2) gen 285 + 95 more gens at depth 7 (slightly
+  faster), same recipe → gen 380. Head-to-head vs the previous Risky (gen 285), 50 games
+  d6: 13W/4L/33D — gen 380 beats Risky-1 by +9 points while preserving the **34%
+  decisive-game rate** that defines the Risky play style. The +3/0/-1 asymmetric scoring
+  reshapes selection toward decisive play instead of draw-shuffling, producing a model
+  that wins more often, loses sometimes, and rarely shuffles. Pair it with Paper-strict
+  on the match page for the most exciting games.
 
 To retrain paper-strict from scratch and re-ship it:
 
