@@ -604,7 +604,7 @@
     setPlaying(false);
   });
   swapBtn.addEventListener("click", () => {
-    if (state.playing || state.moveCount > 0 || state.seriesActive) return;
+    if (!acceptOppChange()) return;
     [state.blackSlotIdx, state.whiteSlotIdx] = [state.whiteSlotIdx, state.blackSlotIdx];
     if (blackOppSel) blackOppSel.value = String(state.blackSlotIdx);
     if (whiteOppSel) whiteOppSel.value = String(state.whiteSlotIdx);
@@ -650,9 +650,24 @@
     blackOppSel.value = String(state.blackSlotIdx);
     whiteOppSel.value = String(state.whiteSlotIdx);
   }
+  // True if the change is acceptable (game not actively playing or in a
+  // running series). When a previous game has finished or moves were
+  // stepped, we silently reset the board/banner/series state so the new
+  // matchup starts cleanly — without this, the eval panel labels could
+  // disagree with the network actually playing each color.
+  function acceptOppChange() {
+    if (state.playing || state.seriesActive) return false;
+    if (state.moveCount > 0 || state.finished) {
+      clearSeries();
+      startGame();
+      showBanner(null);
+      setPlaying(false);
+      log("Opponent changed — board reset.");
+    }
+    return true;
+  }
   blackOppSel.addEventListener("change", () => {
-    if (state.playing || state.seriesActive || state.moveCount > 0) {
-      // Revert — can't change mid-play.
+    if (!acceptOppChange()) {
       blackOppSel.value = String(state.blackSlotIdx);
       return;
     }
@@ -661,7 +676,7 @@
     updateEvals();
   });
   whiteOppSel.addEventListener("change", () => {
-    if (state.playing || state.seriesActive || state.moveCount > 0) {
+    if (!acceptOppChange()) {
       whiteOppSel.value = String(state.whiteSlotIdx);
       return;
     }
