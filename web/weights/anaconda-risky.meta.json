@@ -1,8 +1,8 @@
 {
-  "source": "checkpoint: best_gen0380.pt (Risky-1 gen 285 + 95 gens d7 no-q +3/-1, pop 50)",
+  "source": "checkpoint: best_gen0250.pt (fresh-init pop-60 anaconda curriculum 0:3,30:4,80:5,180:6)",
   "architecture": "Anaconda (2001)",
   "arch_key": "2001",
   "nWeights": 5048,
-  "generations": 380,
-  "note": "Risky-2 — second-generation risky/entertainment-focused variant. Resumed from the previous shipped Risky (gen 285) with a synthetic pop-50 seed and trained 95 more gens at depth 7, quiescence OFF, max-sigma 1.0, asymmetric +3.0/0.0/-1.0 scoring. Run hit a peak best fitness of +24 at gen 378 (one individual: 8W/0L/4D — the strongest single-gen result across all training runs). Gen 380 (the closest checkpoint to that peak) ships here. Head-to-head vs the previous Risky (gen 285), 50 games d6 RO=8 seed=42: 13W/4L/33D — gen 380 beats Risky-1 by +9 tournament points while preserving the 34% decisive-game rate that defines the Risky play style. Final king weight K=1.59."
+  "generations": 250,
+  "note": "Risky-3 — entirely fresh-init lineage (no resume from prior Risky). Trained from random N(0, 0.05) weights with pop 60, asymmetric +3.0/0.0/-1.0 scoring, max-sigma 0.5, quiescence ON, depth curriculum gen0:d3 → gen30:d4 → gen80:d5 → gen180:d6. Gen 250 is from the early d6 phase (70 gens after the d6 transition). Head-to-head vs the prior shipped Risky (gen 380 from the resumed Risky-2 lineage), 200 games d6 RO=8 seed=42: 37W/22L/141D = +15 tournament points. Gen 250 wins 63% of the 59 decisive games (29.5% decisive-rate, near the 30% Risky-style target). The fresh-init curriculum approach produced a meaningfully stronger Risky than 95+ generations of resume-from-prior runs ever managed."
 }

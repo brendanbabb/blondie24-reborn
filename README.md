@@ -187,15 +187,18 @@ the exact checkpoint and training recipe.
   (through gen 240) plus a 30-gen d7/d8 finishing curriculum. Beats the previous shipped
   Enhanced (gen 240) by +9 tournament points over a 150-game head-to-head at depth 6
   (24W/15L/111D; 62% decisive-game win rate).
-- **Risky** (`anaconda-risky.bin`) — **gen 380**. Trained in two phases: (1) Enhanced
-  gen 270 + 15 gens at depth 8, quiescence off, with aggressive +3/0/-1 scoring and a
-  synthetic pop-50 seed → gen 285; (2) gen 285 + 95 more gens at depth 7 (slightly
-  faster), same recipe → gen 380. Head-to-head vs the previous Risky (gen 285), 50 games
-  d6: 13W/4L/33D — gen 380 beats Risky-1 by +9 points while preserving the **34%
-  decisive-game rate** that defines the Risky play style. The +3/0/-1 asymmetric scoring
-  reshapes selection toward decisive play instead of draw-shuffling, producing a model
-  that wins more often, loses sometimes, and rarely shuffles. Pair it with Paper-strict
-  on the match page for the most exciting games.
+- **Risky** (`anaconda-risky.bin`) — **gen 250 from a fresh-init curriculum run**. Pop 60,
+  random N(0, 0.05) initialization (no resume from prior Risky), asymmetric +3/0/-1
+  scoring, max-sigma 0.5, quiescence ON, depth curriculum
+  `gen0:d3 → gen30:d4 → gen80:d5 → gen180:d6`. Gen 250 lands in the early d6 phase
+  (70 gens after the d6 transition). At 200-game power vs the previous Risky (gen 380
+  from the resume-lineage Risky-2), gen 250 wins **+15 tournament points** (37W/22L/141D),
+  taking 63% of decisive games. ~30% decisive-game rate — slightly less drama than the
+  prior 34% Risky, but meaningfully stronger and still produces real wins and losses
+  rather than draw-shuffling. The +3/0/-1 asymmetry rewards decisive play during training,
+  and the fresh-init + curriculum approach finally beat what 95+ generations of
+  resume-from-prior runs could not. Pair it with Paper-strict on the match page for the
+  most exciting games.
 
 To retrain paper-strict from scratch and re-ship it:
 

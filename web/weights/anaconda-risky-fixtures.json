@@ -39,7 +39,7 @@
         -1
       ],
       "currentPlayer": 1,
-      "score": -0.7525048851966858
+      "score": -0.29145121574401855
     },
     {
       "label": "starting-position-white-to-move",
@@ -78,7 +78,7 @@
         -1
       ],
       "currentPlayer": -1,
-      "score": -0.777140736579895
+      "score": -0.30991652607917786
     },
     {
       "label": "black-up-two-pieces-black-to-move",
@@ -117,7 +117,7 @@
         -1
       ],
       "currentPlayer": 1,
-      "score": 0.9991104602813721
+      "score": 0.9993826150894165
     },
     {
       "label": "two-kings-sparse-black-to-move",
@@ -156,7 +156,7 @@
         -2
       ],
       "currentPlayer": 1,
-      "score": -0.84882652759552
+      "score": -0.15656712651252747
     },
     {
       "label": "endgame-black-king-vs-white-man",
@@ -195,7 +195,7 @@
         0
       ],
       "currentPlayer": 1,
-      "score": 0.7859714031219482
+      "score": 0.4490432143211365
     }
   ]
 }
