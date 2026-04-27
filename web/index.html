@@ -15,7 +15,7 @@
       <a href="play-strong.html">Play the fully-evolved version →</a>
     </p>
     <details id="about" open>
-      <summary>What am I looking at? &nbsp;(how the 2-second evolve works)</summary>
+      <summary>What am I looking at? &nbsp;(how the 2.5-second evolve works)</summary>
       <p>
         A live re-implementation of Chellapilla &amp; Fogel's 1999 evolutionary
         checkers experiment: a 1,743-weight feedforward network that learns to
@@ -23,13 +23,23 @@
         endgame database, and no backpropagation — only self-play under an
         evolutionary strategy. <a href="https://github.com/brendanbabb/blondie24-reborn" target="_blank" rel="noreferrer">Source on GitHub</a>.
       </p>
-      <p><b>Every AI turn, here's what happens in roughly two seconds:</b></p>
+      <p><b>Every AI turn, here's what happens in roughly 2.5 seconds:</b></p>
       <ol>
         <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>3 self-play games</b> against random opponents from the group. Training search goes <b>4 plies deep</b> — same depth the AI uses against you, and the same depth the paper used. No hand-crafted endgame boost: Fogel didn't use one either.</li>
         <li>Games are scored <b>+1 win / 0 draw / −2 loss</b> (paper's asymmetric scoring). The top 3 networks survive; the bottom 3 are replaced by <b>Gaussian-mutated offspring</b> of the survivors.</li>
-        <li>That's <b>one generation</b>. The browser runs as many gens as fit into those two seconds — typically 4–10 at these settings.</li>
+        <li>That's <b>one generation</b>. The browser runs as many gens as fit into those 2.5 seconds — typically 5–12 at these settings.</li>
         <li>Time's up. The current <b>top-ranked network</b> runs depth-4 minimax from the board you see and plays a move. The snapshot is frozen — it doesn't change while you think.</li>
       </ol>
+      <p>
+        <b>What the AI actually learns from:</b> fitness is a single number per network —
+        its summed score across those 3 games. Selection only knows the <b>total</b>: it
+        can't see which specific game was won, who the opponent was, or which moves
+        mattered. There's no per-move credit assignment and no gradient — just
+        "this weight vector outscored that one, so copy and perturb it." That's why
+        progress is slow and stochastic: each generation hands each network one
+        ordinal bit ("did I make the top half?") and mutation is undirected Gaussian
+        noise. No backprop, no policy targets, no reward shaping.
+      </p>
       <p>
         Evolution is paused during your turn, so the AI you face at any point was the fittest
         in the last-completed tournament. Across ~30 AI turns in a game, the population runs
@@ -164,6 +174,8 @@
         <p class="legend">
           6 networks · 3 games each per generation ·
           <b>+1</b> win / <b>0</b> draw / <b>−2</b> loss (paper scoring).
+          Fitness is the <b>sum</b> across all 3 games — selection sees the total only,
+          not which game was won or how.
         </p>
         <ol id="leaderboard">
           <li class="placeholder">Waiting for first generation…</li>
