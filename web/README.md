@@ -1,7 +1,7 @@
 # Browser demo — developer notes
 
 A self-contained, build-free static site that re-implements Chellapilla & Fogel's 1999
-evolutionary-checkers architecture in vanilla JavaScript. The AI trains for ~2.5 seconds of
+evolutionary-checkers architecture in vanilla JavaScript. The AI trains for ~3 seconds of
 self-play on every AI turn, then picks its move with the freshly-evolved champion.
 
 ## Relationship to the Python codebase (containment rules)
@@ -75,7 +75,7 @@ Worker sends to main:
 | `{type: "error", message, stack}` | Any exception inside the gen loop. Main surfaces this in the status banner so silent hangs become visible. |
 
 `pause` and `snapshot` only take effect **between** gens (each gen is a synchronous chunk
-of worker CPU), so deep-depth endgame gens can stall response by up to ~2.5 seconds. The
+of worker CPU), so deep-depth endgame gens can stall response by up to ~3 seconds. The
 main thread's snapshot promise has an 8-second timeout to absorb that.
 
 ## Key constants you might want to tweak
@@ -96,9 +96,9 @@ In `web/js/main.js`:
 
 ```js
 AI_DEPTH            = 4     // depth for the move the AI plays against you
-TRAIN_BURST_MS      = 2500  // how long the worker evolves between AI moves
+TRAIN_BURST_MS      = 3000  // how long the worker evolves between AI moves
 MIN_SEARCH_PAD_MS   = 200   // UX pad so the AI doesn't snap-move instantly
-PRETRAIN_GENS       = 4     // warmup gens run when you click New game
+PRETRAIN_GENS       = 5     // warmup gens run when you click New game
 MINI_STEP_MS        = 220   // ms per frame in the self-play replay animation
 MINI_END_HOLD_MS    = 1800  // pause on the winner banner before alternating
 ```
@@ -115,7 +115,7 @@ The demo deliberately stays close to Chellapilla & Fogel 1999:
 - **Asymmetric scoring** (+1 / 0 / −2), **random pairing**, **no crossover**, **Schwefel
   self-adaptive σ mutation** all match the paper.
 - **Differences from the paper** for browser-practicality: population of 6 (paper: 15),
-  3 games per individual (paper: 5), and a 2.5-second per-turn evolution budget instead of
+  3 games per individual (paper: 5), and a 3-second per-turn evolution budget instead of
   the paper's overnight-per-generation runs. None of these change the algorithm, only its
   scale.
 

@@ -15,7 +15,7 @@
       <a href="play-strong.html">Play the fully-evolved version →</a>
     </p>
     <details id="about" open>
-      <summary>What am I looking at? &nbsp;(how the 2.5-second evolve works)</summary>
+      <summary>What am I looking at? &nbsp;(how the 3-second evolve works)</summary>
       <p>
         A live re-implementation of Chellapilla &amp; Fogel's 1999 evolutionary
         checkers experiment: a 1,743-weight feedforward network that learns to
@@ -23,11 +23,11 @@
         endgame database, and no backpropagation — only self-play under an
         evolutionary strategy. <a href="https://github.com/brendanbabb/blondie24-reborn" target="_blank" rel="noreferrer">Source on GitHub</a>.
       </p>
-      <p><b>Every AI turn, here's what happens in roughly 2.5 seconds:</b></p>
+      <p><b>Every AI turn, here's what happens in roughly 3 seconds:</b></p>
       <ol>
         <li>The AI holds a <b>population of 6 networks</b>. Each plays <b>3 self-play games</b> against random opponents from the group. Training search goes <b>4 plies deep</b> — same depth the AI uses against you, and the same depth the paper used. No hand-crafted endgame boost: Fogel didn't use one either.</li>
         <li>Games are scored <b>+1 win / 0 draw / −2 loss</b> (paper's asymmetric scoring). The top 3 networks survive; the bottom 3 are replaced by <b>Gaussian-mutated offspring</b> of the survivors.</li>
-        <li>That's <b>one generation</b>. The browser runs as many gens as fit into those 2.5 seconds — typically 5–12 at these settings.</li>
+        <li>That's <b>one generation</b>. The browser runs as many gens as fit into those 3 seconds — typically 6–15 at these settings.</li>
         <li>Time's up. The current <b>top-ranked network</b> runs depth-4 minimax from the board you see and plays a move. The snapshot is frozen — it doesn't change while you think.</li>
       </ol>
       <p>
