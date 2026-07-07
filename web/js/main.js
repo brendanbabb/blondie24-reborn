@@ -3,7 +3,7 @@
  *
  * Evolution runs on a pull-dispatch pool of 4-6 game workers, coordinated
  * from the main thread by evolution.js. On each AI turn:
- *   1. Resume evolution for ~3s (gens accumulate across the pool).
+ *   1. Resume evolution for ~2s (gens accumulate across the pool).
  *   2. Pause, snapshot the top-ranked weights at the next gen boundary.
  *   3. Run depth-4 minimax locally with that snapshot.
  *   4. Commit the move. The gen counter reflects the gen that moved.
@@ -36,7 +36,7 @@
   const humanColorSel = document.getElementById("human-color");
 
   const AI_DEPTH = 4;
-  const TRAIN_BURST_MS = 2500;   // evolution runs this long per AI turn
+  const TRAIN_BURST_MS = 2000;   // evolution runs this long per AI turn
   const MIN_SEARCH_PAD_MS = 200; // small UX pad so moves don't snap instantly
   const PRETRAIN_GENS = 5;       // gens to run between New Game and first move
 
