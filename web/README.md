@@ -118,7 +118,7 @@ In `web/js/main.js`:
 
 ```js
 AI_DEPTH            = 4     // depth for the move the AI plays against you
-TRAIN_BURST_MS      = 3000  // how long evolution runs per AI turn
+TRAIN_BURST_MS      = 2500  // how long evolution runs per AI turn
 MIN_SEARCH_PAD_MS   = 200   // UX pad so the AI doesn't snap-move instantly
 PRETRAIN_GENS       = 5     // warmup gens run when you click New game
 MINI_STEP_MS        = 220   // ms per frame in the self-play replay animation
