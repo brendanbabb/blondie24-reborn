@@ -50,6 +50,12 @@ web/
 │                             and picks decisive strong-vs-weak pairings for the replay
 ├── js/game-worker.js       stateless Web Worker: plays ONE flat depth-4 self-play game
 │                             per message (paper-faithful), caches Network wrappers per gen
+├── js/search-worker.js     Web Worker running minimax for the play-strong + match pages
+│                             (time-budgeted searches never freeze the UI); nets cached
+│                             by slotId
+├── js/search-client.js     main-thread promise wrapper for search-worker with request
+│                             matching, stale-result epochs handled by callers, and a
+│                             synchronous main-thread fallback when Workers are unavailable
 └── js/main.js              UI glue: click-to-move, forced-jump enforcement, training panel,
                               live leaderboard (currently hidden), eval bar, self-play
                               replay, network-architecture viz, move history,

@@ -28,7 +28,6 @@
   const AI_MAX_DEPTH = 14;
   const AI_BUDGET_MS = 1200;
   const MIN_SEARCH_PAD_MS = 200;       // UX pad so fast endgames don't snap-move
-  const THINKING_YIELD_MS = 20;        // paint the "AI is thinking…" banner before blocking
   const PLAN_PLIES = 6;                // # of mini-boards in the AI's-plan strip
   const PLAN_BOARD_PX = 72;            // each mini-board canvas size
   const PLAN_REVEAL_MS = 90;           // delay between progressive reveals
@@ -97,7 +96,13 @@
     gameActive: false,
     aiDepthFloor: AI_DEPTH_FLOOR_DEFAULT,
     openingPlies: 0,             // random plies applied at New game (0 = standard start)
+    gameEpoch: 0,                // bumped on every reset; stale async search results are dropped
   };
+
+  // Minimax runs in a Web Worker (search-worker.js) so deep budgeted
+  // searches don't freeze the page; falls back to main-thread search if
+  // Workers are unavailable.
+  const searchClient = SearchClient.create({});
 
   // ---- Logging helpers ----
   function log(msg) {
@@ -140,7 +145,8 @@
         A.loadWeightsFromUrl(opp.weightsUrl),
         fetch(opp.metaUrl).then(r => r.ok ? r.json() : null).catch(() => null),
       ]);
-      state.aiNet = A.makeNetwork(weights);
+      state.aiNet = A.makeNetwork(weights);  // main-thread copy for eval bar / plan panel
+      searchClient.setWeights(opp.id, weights);
       state.netReady = true;
       document.getElementById("weights-label").textContent = String(weights.length);
       // King weight is the last slot in the flat vector (AnacondaNetwork.N_WEIGHTS - 1).
@@ -396,16 +402,16 @@
     log(`AI is thinking (depth ${state.aiDepthFloor}+)…`);
     updateButtons();
 
-    // Yield one paint so the banner updates before we block the main thread
-    // inside pickMove. setTimeout + a short pad make the move feel deliberate
-    // for fast endgames without artificially dragging out the user-facing
-    // latency of deep searches.
-    setTimeout(() => {
-      const searchStart = performance.now();
-      const result = M.pickMove(state.board, state.aiDepthFloor, state.aiNet, {
-        budgetMs: AI_BUDGET_MS,
-        maxDepth: AI_MAX_DEPTH,
-      });
+    // The search runs in the worker; the page stays interactive. Capture the
+    // game epoch so a result landing after New game / opponent switch is
+    // discarded instead of moving on the wrong board.
+    const myEpoch = state.gameEpoch;
+    const searchStart = performance.now();
+    searchClient.search(state.board, state.currentOpponentId, state.aiDepthFloor, {
+      budgetMs: AI_BUDGET_MS,
+      maxDepth: AI_MAX_DEPTH,
+    }).then((result) => {
+      if (state.gameEpoch !== myEpoch || !state.gameActive) return;  // stale
       const searchMs = performance.now() - searchStart;
       state.aiThinkMs += searchMs;
       state.aiMoveCount += 1;
@@ -419,6 +425,7 @@
       renderAiPlan(state.board, result.pv || [], result.score);
       const pad = Math.max(0, MIN_SEARCH_PAD_MS - searchMs);
       setTimeout(() => {
+        if (state.gameEpoch !== myEpoch || !state.gameActive) return;  // stale
         state.aiThinking = false;
         if (!result.move) {
           state.finished = true;
@@ -433,7 +440,13 @@
           log(`AI played ${describeMove(result.move)} (depth ${result.depthReached}) — your move.`);
         }
       }, pad);
-    }, THINKING_YIELD_MS);
+    }).catch((err) => {
+      if (state.gameEpoch !== myEpoch) return;
+      console.error("AI search failed:", err);
+      state.aiThinking = false;
+      showBanner("", "AI search failed: " + (err.message || err) + ". Click New game to reset.");
+      updateButtons();
+    });
   }
 
   // ---- Search-effort stat ----
@@ -718,6 +731,7 @@
 
   // ---- New game ----
   function resetGame(autoStart) {
+    state.gameEpoch++;  // invalidate any in-flight AI search
     state.board = C.makeBoard();
     state.selectedFrom = -1;
     state.pendingJumpPath = null;

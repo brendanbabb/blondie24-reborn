@@ -112,7 +112,17 @@
     // Tally is keyed by SLOTS index — 0,1,2. Expanded to cover all three
     // possible opponents; only the two currently playing accumulate scores.
     tally: { 0: { w: 0, l: 0, d: 0 }, 1: { w: 0, l: 0, d: 0 }, 2: { w: 0, l: 0, d: 0 } },
+    // Async-search guards: runEpoch invalidates in-flight worker results
+    // across board resets / slot swaps; moveInFlight blocks a second search
+    // from starting off the same position (e.g. double-clicked Step).
+    runEpoch: 0,
+    moveInFlight: false,
   };
+
+  // Minimax runs in a Web Worker (search-worker.js) so depth-8 searches
+  // don't stutter the board animation; falls back to main-thread search if
+  // Workers are unavailable.
+  const searchClient = SearchClient.create({});
 
   // ---- Helpers ----
   function blackSlot() { return SLOTS[state.blackSlotIdx]; }
@@ -343,14 +353,32 @@
   }
 
   // ---- The actual move loop ----
-  function playOneMove() {
-    if (state.finished) return false;
+  // Async: the search runs in the worker. Returns false when the game (or
+  // this move) should not continue the loop. A pause mid-search lets the
+  // in-flight move complete and apply; a reset/swap mid-search bumps
+  // runEpoch and the result is discarded.
+  async function playOneMove() {
+    if (state.finished || state.moveInFlight) return false;
     if (checkEnd()) { afterEnd(); return false; }
 
     const isBlackTurn = state.board.currentPlayer === C.BLACK;
-    const net   = isBlackTurn ? blackNet() : whiteNet();
+    const slotIdx = isBlackTurn ? state.blackSlotIdx : state.whiteSlotIdx;
     const slot  = isBlackTurn ? blackSlot() : whiteSlot();
-    const result = M.pickMove(state.board, state.depth, net);
+    const myEpoch = state.runEpoch;
+    state.moveInFlight = true;
+    let result;
+    try {
+      result = await searchClient.search(state.board, String(slotIdx), state.depth, null);
+    } catch (err) {
+      state.moveInFlight = false;
+      console.error("search failed:", err);
+      showBanner("Search failed: " + (err.message || err), "");
+      setPlaying(false);
+      return false;
+    }
+    state.moveInFlight = false;
+    if (myEpoch !== state.runEpoch || state.finished) return false;  // stale
+
     if (!result || !result.move) {
       state.finished = true;
       const winnerLabel = isBlackTurn ? whiteSlot().label : blackSlot().label;
@@ -386,6 +414,7 @@
 
   // ---- Series ----
   function startGame() {
+    state.runEpoch++;  // invalidate any in-flight search result
     state.board = C.makeBoard();
     state.moveCount = 0;
     state.lastFrom = -1;
@@ -505,11 +534,15 @@
     seriesInline.hidden = true;
   }
 
-  function loop() {
+  async function loop() {
     state.timer = null;
     if (!state.playing) return;
-    const ok = playOneMove();
+    const ok = await playOneMove();
     if (!ok) return;
+    // Paused (or reset) while the search was in flight — the move above
+    // still applied (pause = "finish the current move"), but don't schedule
+    // another.
+    if (!state.playing) return;
     state.timer = setTimeout(loop, state.speedMs);
   }
 
@@ -594,7 +627,7 @@
   stepBtn.addEventListener("click", () => {
     if (state.playing || state.finished) return;
     showBanner(null);
-    playOneMove();
+    playOneMove().catch(console.error);  // moveInFlight blocks double-clicks
   });
   resetBtn.addEventListener("click", () => {
     if (state.timer) { clearTimeout(state.timer); state.timer = null; }
@@ -605,6 +638,7 @@
   });
   swapBtn.addEventListener("click", () => {
     if (!acceptOppChange()) return;
+    state.runEpoch++;  // a Step search could be in flight at move 0
     [state.blackSlotIdx, state.whiteSlotIdx] = [state.whiteSlotIdx, state.blackSlotIdx];
     if (blackOppSel) blackOppSel.value = String(state.blackSlotIdx);
     if (whiteOppSel) whiteOppSel.value = String(state.whiteSlotIdx);
@@ -671,6 +705,7 @@
       blackOppSel.value = String(state.blackSlotIdx);
       return;
     }
+    state.runEpoch++;
     state.blackSlotIdx = parseInt(blackOppSel.value, 10);
     updateLabels();
     updateEvals();
@@ -680,6 +715,7 @@
       whiteOppSel.value = String(state.whiteSlotIdx);
       return;
     }
+    state.runEpoch++;
     state.whiteSlotIdx = parseInt(whiteOppSel.value, 10);
     updateLabels();
     updateEvals();
@@ -690,7 +726,10 @@
     log("Loading networks…");
     try {
       const weights = await Promise.all(SLOTS.map(s => A.loadWeightsFromUrl(s.weightsUrl)));
-      SLOTS.forEach((_, i) => { state.nets[i] = A.makeNetwork(weights[i]); });
+      SLOTS.forEach((_, i) => {
+        state.nets[i] = A.makeNetwork(weights[i]);   // main-thread copy for the eval bars
+        searchClient.setWeights(String(i), weights[i]);
+      });
       populateOppDropdowns();
       updateLabels();
       render();
