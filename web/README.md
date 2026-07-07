@@ -64,10 +64,19 @@ The EP loop (pairings, fitness, selection, mutation — microseconds per gen) ru
 per generation — fans out to a pool of 4-8 stateless **game workers** (`js/game-worker.js`,
 pool size = `clamp(hardwareConcurrency - 2, 4, 8)`).
 
-Dispatch is **pull-based**: each worker holds one game at a time and is handed the next
-from the queue when its result arrives, so one 80-move shuffle-draw only ever strands one
-worker. Generations are a barrier (gen N+1's population needs gen N's full ranking); a
+Dispatch is **pull-based with double-buffering**: while the queue is deep each worker
+keeps 2 games in its own message queue (no main-thread round-trip between games),
+dropping to 1 near the tail so late games go to whichever worker frees up first.
+Generations are a barrier (gen N+1's population needs gen N's full ranking); a
 `reset()` mid-gen bumps an epoch counter and in-flight results are dropped by tag.
+
+Barrier-cost findings (measured via the `genStats` field on gen events): the gap
+between actual gen time and the ideal makespan `max(gameMsSum/pool, gameMsMax)` is
+only ~20% and is tail-packing fragmentation; the bigger effect is that games run
+~2.5× slower across 8 concurrent workers than single-threaded (all-core clocks +
+E-cores). Hedged tail dispatch (racing duplicates of stragglers,
+`create({hedge: true})`) measured neutral — a duplicate replays from move 0 and
+rarely beats a nearly-done straggler — so it's off by default.
 
 Main-thread API (`Evolution.create({onGen, onError})`):
 

@@ -87,6 +87,7 @@ let reentrantHook = null;  // set by test 6 to re-enter evo from inside onGen
 const evo = ctx.Evolution.create({
   WorkerCtor: FakeWorker,
   poolSize: 4,
+  hedge: true,  // exercise the hedged-tail path (off by default in prod)
   onGen: (msg) => {
     genEvents.push(msg);
     if (reentrantHook) reentrantHook(msg);
@@ -194,6 +195,23 @@ function checkGenEvent(e) {
   evo.pause();
   await evo.snapshot();
   console.log('re-entrant pause+resume inside onGen: no double-start, accounting intact');
+
+  // ---- 7) default (hedge off) still completes gens with clean accounting ----
+  // (Phases above ran with hedged tail dispatch ON, where duplicate results
+  // at the tail would break the W+L+D=36 invariant if double-applied.)
+  const genEvents2 = [];
+  const evo2 = ctx.Evolution.create({
+    WorkerCtor: FakeWorker,
+    poolSize: 4,
+    onGen: (msg) => genEvents2.push(msg),
+    onError: (m) => errors.push(m),
+  });
+  evo2.resume();
+  await waitFor(() => genEvents2.length >= 2, 60000, '2 gens with hedge:false');
+  for (const e of genEvents2) checkGenEvent(e);
+  evo2.pause();
+  await evo2.snapshot();
+  console.log('default (hedge off) path: gens complete, accounting intact');
 
   assert(errors.length === 0, `worker errors: ${errors.join('; ')}`);
   console.log('\nAll pool tests passed.');

@@ -86,13 +86,15 @@ self.onmessage = function (ev) {
         });
         return;
       }
+      const t0 = performance.now();
       const r = playGame(nets[msg.blackIdx], nets[msg.whiteIdx]);
+      const gameMs = performance.now() - t0;
       const transfers = [];
       for (const f of r.frames) transfers.push(f.buffer);
       postMessage({
         type: "result", epoch: msg.epoch, gen: msg.gen, gameId: msg.gameId,
         blackIdx: msg.blackIdx, whiteIdx: msg.whiteIdx,
-        winner: r.winner, frames: r.frames,
+        winner: r.winner, frames: r.frames, gameMs: gameMs,
       }, transfers);
       return;
     }

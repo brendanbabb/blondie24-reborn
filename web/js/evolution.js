@@ -13,6 +13,26 @@
  * games-per-worker split would idle the fast workers behind the slowest —
  * with pull dispatch the end-of-gen straggler wait is at most one game.
  *
+ * Barrier-cost experiments (2026-07, 24-thread hybrid-core box, 8 workers) —
+ * measured via the per-gen genStats diagnostics below:
+ *   - In-worker game time sums to ~1,050 ms/gen but genMs is ~170 ms; the
+ *     gap to the ideal makespan max(sum/8, longest game) is only ~35 ms
+ *     (~20%). The dominant "loss" is that games run ~2.5× slower inside 8
+ *     concurrent workers than the same code single-threaded (all-core
+ *     clocks + E-core placement) — physics, not scheduling.
+ *   - The ~35 ms residual is TAIL PACKING: in the last round each worker
+ *     holds 2-3 variable-length games and early finishers idle.
+ *   - Double-buffering (keep 2 games queued per worker while the queue is
+ *     deep) measured neutral on an idle main thread but is kept: it removes
+ *     the dispatch round-trip, which matters when the main thread is busy
+ *     rendering during real play.
+ *   - Hedged tail dispatch (race a DUPLICATE of a still-running game on an
+ *     idle worker, first result wins, losers dropped by gameId/gen tag)
+ *     also measured neutral: a duplicate must replay from move 0 (~55 ms)
+ *     to beat a straggler that's typically ~30 ms from done, so it only
+ *     pays against extreme slow-core outliers. Off by default; enable with
+ *     create({hedge: true}).
+ *
  * Generations are a barrier: gen N+1's population depends on gen N's full
  * ranking, so a new gen starts only after all 18 results are in. reset()
  * during a gen bumps an epoch counter; results tagged with a stale epoch or
@@ -55,6 +75,11 @@
   const POOL_MIN = 4;
   const POOL_MAX = 8;
 
+  // Max concurrent copies of one game under hedged dispatch (original + 1
+  // duplicate). More copies burn workers on the same race for shrinking
+  // returns.
+  const HEDGE_MAX_COPIES = 2;
+
   function now() {
     return (typeof performance !== "undefined") ? performance.now() : Date.now();
   }
@@ -64,17 +89,18 @@
     const onGen = opts.onGen || function () {};
     const onError = opts.onError || function () {};
     const WorkerCtor = opts.WorkerCtor || global.Worker;
-    const workerUrl = opts.workerUrl || "js/game-worker.js?v=8";
+    const workerUrl = opts.workerUrl || "js/game-worker.js?v=9";
     const hc = (global.navigator && global.navigator.hardwareConcurrency) || POOL_MAX;
     const poolSize = opts.poolSize ||
       Math.max(POOL_MIN, Math.min(POOL_MAX, hc - 2));
+    const hedge = opts.hedge === true;  // hedged tail dispatch, off by default (measured neutral)
 
     // ---- Pool ---------------------------------------------------------
 
-    const workers = [];  // { w, busy }
+    const workers = [];  // { w, outstanding: games sent, results not yet back }
     for (let i = 0; i < poolSize; i++) {
       const w = new WorkerCtor(workerUrl);
-      const slot = { w, busy: false };
+      const slot = { w, outstanding: 0 };
       w.onmessage = (ev) => onWorkerMessage(slot, ev.data || {});
       w.onerror = (ev) => {
         onError("game worker crashed: " + ((ev && ev.message) || "unknown"));
@@ -91,10 +117,18 @@
 
     // Per-generation flight state.
     let genInFlight = false;
-    let queue = [];         // game specs awaiting dispatch
-    let pending = 0;        // dispatched, result not yet in
+    let specs = [];         // all game specs this gen, by gameId
+    let queue = [];         // specs awaiting first dispatch
+    let done = [];          // by gameId — first result in?
+    let doneCount = 0;
+    let inFlight = [];      // by gameId — concurrent copies out (for hedging)
     let recordings = [];    // by gameId — all 18 present at gen end
     let genStartMs = 0;
+    // Diagnostics for the gen barrier: total in-worker game CPU, the longest
+    // single game, and how many hedge duplicates were dispatched.
+    let genGameMsSum = 0;
+    let genGameMsMax = 0;
+    let genHedges = 0;
 
     let lastTournamentSnapshot = null;
     let snapshotWaiters = [];  // { resolve, reject } — settled at gen boundary
@@ -163,15 +197,21 @@
       // Re-entrancy guard: onGen handlers may call resume() synchronously
       // from inside finishGen (the warmup flow does exactly that), which
       // starts the next gen before finishGen's own trailing startGen runs.
-      // Starting the same gen twice would reset `pending` with games still
-      // in flight and wedge the pool.
+      // Starting the same gen twice would reset the flight state with games
+      // still in flight and wedge the pool.
       if (genInFlight) return;
       genInFlight = true;
       genStartMs = now();
       resetFitness();
       recordings = [];
-      queue = buildPairings();
-      pending = 0;
+      specs = buildPairings();
+      queue = specs.slice();
+      done = new Array(specs.length).fill(false);
+      doneCount = 0;
+      inFlight = new Array(specs.length).fill(0);
+      genGameMsSum = 0;
+      genGameMsMax = 0;
+      genHedges = 0;
 
       // Broadcast this generation's weights, then hand every idle worker its
       // first game. postMessage is FIFO per worker, so plays can never
@@ -183,16 +223,42 @@
       for (const slot of workers) dispatchTo(slot);
     }
 
+    // Tail hedging: pick a still-running game with the fewest copies out.
+    function pickHedge() {
+      let best = null;
+      for (const spec of specs) {
+        const id = spec.gameId;
+        if (done[id] || inFlight[id] >= HEDGE_MAX_COPIES) continue;
+        if (best === null || inFlight[id] < inFlight[best.gameId]) best = spec;
+      }
+      return best;
+    }
+
+    // Double-buffering: keep up to 2 games queued per worker while the game
+    // queue is deep — the worker starts its next game straight from its own
+    // message queue instead of idling a main-thread dispatch round-trip
+    // (~2 ms × 18 games/gen, measured). Near the tail (queue shorter than
+    // the pool) drop to 1 outstanding so the last games stay stealable by
+    // whichever worker frees up first instead of committed to a busy one.
+    function maxOutstanding() {
+      return queue.length > workers.length ? 2 : 1;
+    }
+
     function dispatchTo(slot) {
-      if (slot.busy) return;
-      const spec = queue.shift();
-      if (!spec) return;
-      slot.busy = true;
-      pending++;
-      slot.w.postMessage({
-        type: "play", epoch, gen: generation,
-        gameId: spec.gameId, blackIdx: spec.blackIdx, whiteIdx: spec.whiteIdx,
-      });
+      while (slot.outstanding < maxOutstanding()) {
+        let spec = queue.shift() || null;
+        if (spec === null && hedge && genInFlight && slot.outstanding === 0) {
+          spec = pickHedge();
+          if (spec !== null) genHedges++;
+        }
+        if (spec === null) return;
+        slot.outstanding++;
+        inFlight[spec.gameId]++;
+        slot.w.postMessage({
+          type: "play", epoch, gen: generation,
+          gameId: spec.gameId, blackIdx: spec.blackIdx, whiteIdx: spec.whiteIdx,
+        });
+      }
     }
 
     function onWorkerMessage(slot, msg) {
@@ -203,22 +269,36 @@
       }
       if (msg.type !== "result") return;
 
-      slot.busy = false;
+      if (slot.outstanding > 0) slot.outstanding--;
 
-      // Stale result from before a reset: drop it, but the slot is free now —
-      // pull from the CURRENT queue so a reset mid-gen doesn't strand it.
+      // Stale result from before a reset (or a hedge loser that ran past its
+      // gen's end): drop it, but the slot is free now — pull from the CURRENT
+      // gen so it isn't stranded.
       if (msg.epoch !== epoch || msg.gen !== generation || !genInFlight) {
         dispatchTo(slot);
         return;
       }
 
-      pending--;
+      inFlight[msg.gameId]--;
+
+      // Hedge race already decided by another copy — drop the duplicate.
+      if (done[msg.gameId]) {
+        dispatchTo(slot);
+        return;
+      }
+
+      done[msg.gameId] = true;
+      doneCount++;
+      if (typeof msg.gameMs === "number") {
+        genGameMsSum += msg.gameMs;
+        if (msg.gameMs > genGameMsMax) genGameMsMax = msg.gameMs;
+      }
       applyResult(msg);
 
-      if (queue.length > 0) {
-        dispatchTo(slot);
-      } else if (pending === 0) {
+      if (doneCount === specs.length) {
         finishGen();
+      } else {
+        dispatchTo(slot);
       }
     }
 
@@ -321,6 +401,13 @@
         sampleGameA: sampleGameA,
         sampleGameB: sampleGameB,
         genMs: now() - genStartMs,
+        // Barrier diagnostics: with perfect scheduling genMs would approach
+        // max(gameMsSum / poolSize, gameMsMax).
+        genStats: {
+          gameMsSum: genGameMsSum,
+          gameMsMax: genGameMsMax,
+          hedges: genHedges,
+        },
       });
 
       // Snapshot requests resolve at the gen boundary so the champion
@@ -360,8 +447,11 @@
       epoch++;  // in-flight results now arrive stale and get dropped
       running = false;
       genInFlight = false;
+      specs = [];
       queue = [];
-      pending = 0;
+      done = [];
+      doneCount = 0;
+      inFlight = [];
       recordings = [];
       lastTournamentSnapshot = null;
       const waiters = snapshotWaiters;
