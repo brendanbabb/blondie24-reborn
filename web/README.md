@@ -38,8 +38,8 @@ web/
 ├── js/checkers.js          32-square engine (legal moves, multi-jumps, king promotion,
 │                             threefold-repetition hash)
 ├── js/network.js           1,743-weight MLP (32 → 40 → 10 → 1 tanh) with piece-diff bypass,
-│                             evolvable king weight, fast Padé-tanh approximation,
-│                             Schwefel self-adaptive EP mutation
+│                             evolvable king weight (init 2.0, clamped [1,3]), fast
+│                             Padé-tanh approximation, single-τ self-adaptive EP mutation
 ├── js/minimax.js           negamax + alpha-beta with make/unmake, a per-search Zobrist
 │                             transposition table, and iterative deepening + TT-move-first
 │                             ordering; capture-length move ordering as fallback
@@ -112,8 +112,10 @@ The demo deliberately stays close to Chellapilla & Fogel 1999:
 - **Piece-difference bypass weight** is initialized from N(0, σ), same as every other weight
   — not seeded to a useful positive value. Gen-0 networks play chaotically; selection finds
   the useful bypass value over 10–50 generations.
-- **Asymmetric scoring** (+1 / 0 / −2), **random pairing**, **no crossover**, **Schwefel
-  self-adaptive σ mutation** all match the paper.
+- **Asymmetric scoring** (+1 / 0 / −2), **random pairing**, **no crossover**, **single-τ
+  self-adaptive σ mutation** (σ′ = σ·exp(τ·Nᵢ), the paper's rule — no correlated global
+  noise factor), and **king weight K initialized at 2.0 and clamped to [1, 3]** all match
+  the paper.
 - **Differences from the paper** for browser-practicality: population of 6 (paper: 15),
   3 games per individual (paper: 5), and a 3-second per-turn evolution budget instead of
   the paper's overnight-per-generation runs. None of these change the algorithm, only its

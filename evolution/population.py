@@ -24,9 +24,18 @@ class Population:
         ref_net = make_network(net_config)
         self.n_weights = ref_net.num_weights()
 
+        # Where the evolvable king weight K sits in the flat vector
+        # (index 1 for the 1999 net, last slot for Anaconda). Used to
+        # initialize K at the paper's 2.0 and clamp it to [1, 3] on mutation.
+        self.king_idx = ref_net.king_weight_index()
+
         # Initialize population
         self.individuals: list[Individual] = [
-            initialize_individual(self.n_weights, config)
+            initialize_individual(
+                self.n_weights, config,
+                king_idx=self.king_idx,
+                king_init=net_config.initial_king_weight,
+            )
             for _ in range(config.population_size)
         ]
 
@@ -92,12 +101,13 @@ class Population:
         parents = ranked[:n_keep]
         
         # Reproduce: each parent spawns one offspring
-        offspring = [mutate(parent, self.config) for parent in parents]
-        
+        offspring = [mutate(parent, self.config, king_idx=self.king_idx)
+                     for parent in parents]
+
         # If we need more to fill the population, keep mutating top parents
         while len(parents) + len(offspring) < self.config.population_size:
             extra_parent = parents[len(offspring) % len(parents)]
-            offspring.append(mutate(extra_parent, self.config))
+            offspring.append(mutate(extra_parent, self.config, king_idx=self.king_idx))
         
         # New population: parents keep their weights (but fitness resets next gen)
         # Parents get fresh Individual wrappers to reset fitness
@@ -117,7 +127,8 @@ class Population:
         grows from mu to 2*mu; the tournament then evaluates all 2*mu together.
         Called BEFORE the tournament when selection_scheme == 'mu_plus_mu'.
         """
-        offspring = [mutate(p, self.config) for p in self.individuals]
+        offspring = [mutate(p, self.config, king_idx=self.king_idx)
+                     for p in self.individuals]
         self.individuals = list(self.individuals) + offspring
         return self.individuals
 

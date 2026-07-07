@@ -101,68 +101,27 @@ def write_bin(path: Path, weights: np.ndarray):
 
 
 def make_fixtures(arch: str, weights: np.ndarray) -> list:
-    """Run the Python network on a set of representative boards and record
+    """Run the Python network on the shared fixture boards and record
     (board, score) pairs. JS reads these and asserts equivalence."""
+    from neural.fixtures import FIXTURE_POSITIONS, fixture_scores
+
     if arch == "1999":
         net = CheckersNet(NetworkConfig())
     else:
         net = AnacondaNet(NetworkConfig())
     net.set_weight_vector(weights)
 
-    fixtures = []
-
-    def record(label, squares_32, current_player):
-        # Board encoding follows the ±1 / ±K convention from the current
-        # side-to-move's perspective — same encoder as the JS side uses.
-        king_weight = float(net.king_weight.data.item())
-        x = np.zeros(32, dtype=np.float32)
-        for i, p in enumerate(squares_32):
-            if p == 0:
-                continue
-            is_king = (abs(p) == 2)
-            mag = king_weight if is_king else 1.0
-            x[i] = mag if (p * current_player) > 0 else -mag
-        with torch.no_grad():
-            score = net.forward(torch.from_numpy(x)).item()
-        fixtures.append({
+    scores = fixture_scores(net)
+    return [
+        {
             "label": label,
-            "squares": list(int(p) for p in squares_32),
+            "squares": [int(p) for p in squares_32],
             "currentPlayer": int(current_player),
             "score": float(score),
-        })
-
-    # 1. Starting position, black to move
-    start = [0] * 32
-    for i in range(12):
-        start[i] = 1  # black men
-    for i in range(20, 32):
-        start[i] = -1  # white men
-    record("starting-position-black-to-move", start, +1)
-
-    # 2. Same position, white to move (should be symmetric under the encoder)
-    record("starting-position-white-to-move", start, -1)
-
-    # 3. Material-advantage (black up by 2 pieces)
-    adv = start.copy()
-    adv[20] = 0
-    adv[21] = 0
-    record("black-up-two-pieces-black-to-move", adv, +1)
-
-    # 4. A position with kings on both sides
-    kings = [0] * 32
-    kings[0] = 2    # black king
-    kings[31] = -2  # white king
-    kings[15] = 1   # black man midboard
-    kings[16] = -1  # white man midboard
-    record("two-kings-sparse-black-to-move", kings, +1)
-
-    # 5. Endgame: single black king vs. single white man
-    endgame = [0] * 32
-    endgame[12] = 2
-    endgame[28] = -1
-    record("endgame-black-king-vs-white-man", endgame, +1)
-
-    return fixtures
+        }
+        for (label, squares_32, current_player), score
+        in zip(FIXTURE_POSITIONS, scores)
+    ]
 
 
 def main():

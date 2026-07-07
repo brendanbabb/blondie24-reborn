@@ -122,7 +122,21 @@ class CheckersNet(nn.Module):
     def num_weights(self) -> int:
         """Total number of evolvable parameters."""
         return sum(p.numel() for p in self.parameters())
-    
+
+    def king_weight_index(self) -> int:
+        """Index of king_weight in the flat vector from get_weight_vector().
+
+        Walks self.parameters() in the same order get_weight_vector() does,
+        so the index stays correct even if parameter registration changes.
+        (Current layout: piece_diff [0], king_weight [1], then fc layers.)
+        """
+        offset = 0
+        for param in self.parameters():
+            if param is self.king_weight:
+                return offset
+            offset += param.numel()
+        raise RuntimeError("king_weight not found among parameters")
+
     def copy(self) -> "CheckersNet":
         """Create a deep copy of this network."""
         new_net = CheckersNet(self.config)

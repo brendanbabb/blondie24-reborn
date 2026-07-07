@@ -40,8 +40,7 @@
     //     drawn from N(0, sigma). The paper did NOT seed the bypass with a
     //     useful value — it emerges through selection like everything else.
     //   - King weight is the one exception: paper explicitly initialized K
-    //     at 2.0 (constrained to [1, 3] — we don't clamp, but it rarely
-    //     drifts at sigma=0.05).
+    //     at 2.0, constrained to [1, 3] (mutate() clamps it).
     // This means gen-0 networks play erratically (may give back material
     // freely) — a feature, not a bug, for the "watch it learn" demo.
     sigma = sigma == null ? 0.05 : sigma;
@@ -137,25 +136,28 @@
     return { forward, getKingWeight, getWeights };
   }
 
-  // Schwefel self-adaptive EP mutation (matches evolution/strategy.py).
-  //   sigma_i' = sigma_i * exp(tau_prime * N(0,1) + tau * N_i(0,1))
+  // Self-adaptive EP mutation — the paper's rule (Chellapilla & Fogel
+  // 1999/2001; matches evolution/strategy.py sigma_update="single_tau"):
+  //   sigma_i' = sigma_i * exp(tau * N_i(0,1))
   //   w_i'     = w_i + sigma_i' * N_i(0,1)
-  // No king-weight clamping (matches the repo's current behavior).
+  // No correlated global noise term — a shared factor inflates every sigma
+  // in an offspring together and accelerates weight-magnitude runaway on
+  // draw plateaus. King weight is clamped to the paper's [1, 3] band.
   function mutate(parentWeights, parentSigmas) {
     const n = parentWeights.length;
     const tau = 1.0 / Math.sqrt(2.0 * Math.sqrt(n));
-    const tauPrime = 1.0 / Math.sqrt(2.0 * n);
-    const globalNoise = gauss();
     const w = new Float32Array(n);
     const s = new Float32Array(n);
     const minSigma = 1e-5;
     for (let i = 0; i < n; i++) {
       const localNoise = gauss();
-      let ns = parentSigmas[i] * Math.exp(tauPrime * globalNoise + tau * localNoise);
+      let ns = parentSigmas[i] * Math.exp(tau * localNoise);
       if (ns < minSigma) ns = minSigma;
       s[i] = ns;
       w[i] = parentWeights[i] + ns * gauss();
     }
+    if (w[OFF_KING] < 1.0) w[OFF_KING] = 1.0;
+    else if (w[OFF_KING] > 3.0) w[OFF_KING] = 3.0;
     return { weights: w, sigmas: s };
   }
 

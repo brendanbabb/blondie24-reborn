@@ -165,6 +165,11 @@ class AnacondaNet(nn.Module):
             + 1 + 1                                                # bypass + king
         )
 
+    def king_weight_index(self) -> int:
+        """Index of king_weight in the flat vector: the last slot (see
+        get_weight_vector's explicit ordering)."""
+        return self.num_weights() - 1
+
     def copy(self) -> "AnacondaNet":
         new = AnacondaNet(self.config)
         new.set_weight_vector(self.get_weight_vector())

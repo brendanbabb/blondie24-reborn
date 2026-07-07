@@ -77,6 +77,21 @@ class EvolutionConfig:
     tau_prime: Optional[float] = None  # if None, computed as 1/sqrt(2*n_weights)
     min_sigma: float = 1e-5         # floor to prevent σ collapse
     max_sigma: float = 0.5          # ceiling to prevent σ runaway on flat-gradient phases
+
+    # Sigma self-adaptation rule.
+    # "two_factor": σ' = σ·exp(τ'·N_global + τ·N_i) — the general Schwefel rule.
+    #   The global factor correlates σ inflation across ALL weights in an
+    #   offspring, which accelerates coordinated weight-magnitude runaway
+    #   during flat-fitness (draw-plateau) phases.
+    # "single_tau": σ' = σ·exp(τ·N_i) — what Chellapilla & Fogel actually
+    #   used (1999 eq. and 2001 paper: τ = 1/sqrt(2·sqrt(n)), no global term).
+    sigma_update: str = "two_factor"
+
+    # King weight K is evolved but constrained, per the paper (Fogel 1999/2001:
+    # K initialized at 2.0, constrained to [1, 3]). Applied after each mutation
+    # to the king-weight slot of the flat vector.
+    king_weight_min: float = 1.0
+    king_weight_max: float = 3.0
     
     # Fitness scoring (Fogel 1999: +1 win, 0 draw, -2 loss)
     win_score: float = 1.0

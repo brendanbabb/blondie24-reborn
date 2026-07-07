@@ -88,7 +88,8 @@ Every AI turn, for ~2 seconds:
    "search deeper in the endgame" boost; Fogel didn't use one either.
 3. Scoring is paper-faithful: **+1 win / 0 draw / −2 loss**.
 4. Top 3 networks survive; bottom 3 are replaced by **Gaussian self-adaptive EP mutations**
-   of the survivors (Schwefel rule for σ, no crossover — pure evolutionary programming).
+   of the survivors (the paper's single-τ rule for σ, no crossover — pure evolutionary
+   programming).
 
 Network weights — including the piece-difference bypass — are initialized from **N(0, σ)**
 with σ=0.05, exactly as in the paper. No hand-seeded "material bias" to bootstrap early play:
@@ -135,10 +136,14 @@ so `--preset paper-1999 --depth 6` keeps depth 6 while applying the rest.
 
 ### Strict paper reproduction (for time comparisons)
 
-The `paper-2001` preset above matches the paper's **hyperparameters** but uses two engine
-accelerations not in the original: (1) half-keep-mutate selection (top 50% spawn offspring to
-refill) instead of the paper's (μ+μ) scheme; and (2) quiescence-extended alpha-beta instead
-of plain depth-4 alpha-beta. To turn **both** off and run a true paper copy:
+The `paper-2001` preset above matches the paper's **hyperparameters** but deviates from the
+original in three ways: (1) half-keep-mutate selection (top 50% spawn offspring to
+refill) instead of the paper's (μ+μ) scheme; (2) quiescence-extended alpha-beta instead
+of plain depth-4 alpha-beta; and (3) the two-factor Schwefel σ rule
+(σ′ = σ·exp(τ′·N + τ·Nᵢ), with a global noise factor shared by all weights in an offspring)
+instead of the paper's single-τ rule (σ′ = σ·exp(τ·Nᵢ)). The shared global factor inflates
+every σ together during flat-fitness draw plateaus, which accelerates the weight-magnitude
+runaway that saturated past long runs. To undo all three and run a true paper copy:
 
 ```bash
 python -m training.train --preset paper-2001-strict --generations 850 --workers 20 --device cpu
@@ -151,6 +156,14 @@ Individual flags if you want to isolate one deviation at a time:
   tournament compute per generation.
 - `--no-quiescence` — disable the quiescence extension in the CPU JIT engines. Shorter
   per-position search, smaller JIT warmup.
+- `--sigma-update single-tau` — use the paper's σ self-adaptation (per-weight noise only,
+  no correlated global factor). `two-factor` is the default outside the strict preset.
+
+Regardless of preset, the evolvable king weight K follows the paper exactly: initialized
+at 2.0 and clamped to [1, 3] after every mutation. Training also logs per-generation
+weight health (max |w|, K, and the spread of five fixture-position scores) to the console
+and the `logs/*.jsonl` file, and reports the healthiest saved checkpoint at the end — a
+saturated run (spread ≈ 0) self-identifies which earlier generation to ship.
 
 Head-to-head, 850 generations, 20 CPU workers on a 24-core box:
 
@@ -173,7 +186,7 @@ The [companion browser page](#companion-page-play-the-fully-evolved-anaconda) ha
 opponent slots, picked from a dropdown:
 
 - **Paper-strict** — `web/weights/anaconda-paper-strict.bin`. The strict paper-faithful
-  training: `paper-2001-strict` preset, (μ+μ), no quiescence, symmetric σ evolution.
+  training: `paper-2001-strict` preset, (μ+μ), no quiescence, single-τ σ evolution.
 - **Enhanced** — `web/weights/anaconda-enhanced.bin`. A second run with non-paper tweaks
   (asymmetric win-favoring scoring, quiescence on, optional depth-schedule curriculum)
   intended to break out of the paper-strict draw plateau.
@@ -181,8 +194,10 @@ opponent slots, picked from a dropdown:
 All three slots ship with real trained weights — see each slot's `.meta.json` sidecar for
 the exact checkpoint and training recipe.
 
-- **Paper-strict** (`anaconda-paper-strict.bin`) — gen 500 from a 2000-gen run (gen 850+
-  saturated under unbounded σ and was unusable).
+- **Paper-strict** (`anaconda-paper-strict.bin`) — **gen 350 from an 850-gen run with the
+  paper's single-τ σ rule and K clamped to [1, 3]** (the run's healthiest checkpoint by
+  fixture spread; later gens saturated). Beats the previously shipped gen-500 champion
+  (from a 2000-gen two-factor-σ run) 41W/6L/53D at depth 6 over 100 games.
 - **Enhanced** (`anaconda-enhanced.bin`) — **gen 270**, the two-phase paper-2001 base
   (through gen 240) plus a 30-gen d7/d8 finishing curriculum. Beats the previous shipped
   Enhanced (gen 240) by +9 tournament points over a 150-game head-to-head at depth 6
@@ -305,7 +320,9 @@ This implementation faithfully reproduces the architecture from the original 199
   - king_weight: 1  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ← scalar K ∈ [1,3], scales king squares in the input encoding
   - *The 1999 paper's "1,742" counts only the MLP + piece-diff bypass and treats K as a
     separate evolvable hyperparameter. This repo evolves K with the same self-adaptive σ
-    rule as the other 1,742 weights, so we fold it into the flat vector and report 1,743.*
+    rule as the other 1,742 weights, so we fold it into the flat vector and report 1,743 —
+    but K keeps the paper's special treatment: initialized at exactly 2.0 and clamped to
+    [1, 3] after each mutation.*
 - All evolved via evolutionary programming — none trained by backpropagation
 
 > **The 2001 "Anaconda" / Blondie24 system is also implemented here.** It adds a spatial

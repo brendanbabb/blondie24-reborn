@@ -34,6 +34,8 @@ from datetime import datetime
 
 from config import Config, TrainingConfig, EvolutionConfig, SearchConfig, NetworkConfig
 from evolution.population import Population
+from neural.network import make_network
+from neural.fixtures import fixture_scores
 from evolution.tournament import (
     random_pairing_tournament,
     round_robin_tournament,
@@ -121,6 +123,9 @@ def train(config: Config):
           f"{config.evolution.loss_score:+.1f}")
     print(f"  Initial sigma:    {config.evolution.initial_sigma:.3f}")
     print(f"  Max sigma:        {config.evolution.max_sigma:.3f}")
+    sigma_rule = getattr(config.evolution, "sigma_update", "two_factor")
+    print(f"  Sigma update:     "
+          f"{'single-tau (paper rule)' if sigma_rule == 'single_tau' else 'two-factor (Schwefel)'}")
     scheme = getattr(config.evolution, "selection_scheme", "half_keep_mutate")
     scheme_label = "(mu+mu) paper-strict" if scheme == "mu_plus_mu" else "half-keep-mutate"
     print(f"  Selection:        {scheme_label}")
@@ -184,6 +189,16 @@ def train(config: Config):
     schedule = getattr(config.training, "depth_schedule", None) or []
     current_depth = config.search.depth
 
+    # Weight-health telemetry: a CPU-side net for probing the champion's
+    # fixture-score spread each generation. A healthy net separates the five
+    # fixture positions; a saturated one (weights so big tanh pins) scores
+    # them all identically — spread ~0 means the checkpoint is unusable.
+    health_net = make_network(config.network)
+    # Best checkpoint by fixture spread, so long runs self-report which
+    # saved generation to ship (past runs peaked mid-run then saturated).
+    healthiest = {"spread": -1.0, "gen": None}
+    stats = None
+
     start_gen = population.generation
     end_gen = start_gen + config.training.generations
     scheme = getattr(config.evolution, "selection_scheme", "half_keep_mutate")
@@ -220,6 +235,15 @@ def train(config: Config):
         gen_time = time.time() - gen_start
         stats["time_seconds"] = round(gen_time, 2)
 
+        # Weight health of the current champion
+        best_w = population.best_individual().weights
+        stats["max_abs_w"] = float(np.max(np.abs(best_w)))
+        stats["mean_abs_w"] = float(np.mean(np.abs(best_w)))
+        stats["king_weight"] = float(best_w[population.king_idx])
+        health_net.set_weight_vector(best_w)
+        f_scores = fixture_scores(health_net)
+        stats["fixture_spread"] = float(max(f_scores) - min(f_scores))
+
         # Track best-ever
         if stats["max_fitness"] > best_ever_fitness:
             best_ever_fitness = stats["max_fitness"]
@@ -241,6 +265,9 @@ def train(config: Config):
                 f"Mean: {stats['mean_fitness']:+.2f} | "
                 f"sigma: {stats['mean_sigma']:.4f} | "
                 f"W/L/D: {stats['best_wins']}/{stats['best_losses']}/{stats['best_draws']} | "
+                f"|w|max: {stats['max_abs_w']:.1f} | "
+                f"K: {stats['king_weight']:.2f} | "
+                f"spread: {stats['fixture_spread']:.2f} | "
                 f"{gen_time:.1f}s{gpu_str}"
             )
 
@@ -257,6 +284,8 @@ def train(config: Config):
         # === Checkpoint ===
         if gen % config.training.checkpoint_every == 0:
             _save_checkpoint(population, config, gen)
+            if stats["fixture_spread"] > healthiest["spread"]:
+                healthiest = {"spread": stats["fixture_spread"], "gen": gen}
 
         # === Reproduction (half_keep_mutate only — mu_plus_mu mutates at ===
         # the top of the next iteration via spawn_offspring_from_parents).
@@ -270,6 +299,8 @@ def train(config: Config):
     # === Final checkpoint (skip if the loop just saved the same generation) ===
     if end_gen % config.training.checkpoint_every != 0:
         _save_checkpoint(population, config, end_gen)
+        if stats is not None and stats["fixture_spread"] > healthiest["spread"]:
+            healthiest = {"spread": stats["fixture_spread"], "gen": end_gen}
 
     # Tear down worker pool if one was created
     if pool is not None:
@@ -280,6 +311,15 @@ def train(config: Config):
     print("  Training complete!")
     print(f"  Best fitness this run:  {best_ever_fitness:+.1f}")
     print(f"  Final best individual:  {population.best_individual().fitness:+.1f}")
+    if stats is not None:
+        print(f"  Final weight health:    |w|max {stats['max_abs_w']:.1f}, "
+              f"K {stats['king_weight']:.2f}, fixture spread {stats['fixture_spread']:.2f}")
+    if healthiest["gen"] is not None:
+        print(f"  Healthiest checkpoint by fixture spread: "
+              f"best_gen{healthiest['gen']:04d}.pt (spread {healthiest['spread']:.2f})")
+        if stats is not None and stats["fixture_spread"] < 0.5 * healthiest["spread"]:
+            print("  NOTE: final-gen spread is well below the peak — the run "
+                  "saturated; ship the earlier checkpoint above.")
     print(f"  Log saved to: {log_path}")
     if device.type == "cuda":
         mem = gpu_memory_report()
@@ -358,6 +398,19 @@ def main():
     parser.add_argument("--max-sigma", type=float, default=None,
                         help="Ceiling on per-weight sigma to prevent runaway during "
                              "flat-gradient phases (default: 0.5)")
+    parser.add_argument("--sigma-update", type=str, default=None,
+                        choices=["two-factor", "single-tau"],
+                        help="Sigma self-adaptation rule. 'two-factor' (default) is "
+                             "the general Schwefel rule with a global noise term "
+                             "shared by all weights; 'single-tau' is what the paper "
+                             "actually used (sigma' = sigma*exp(tau*N_i), no global "
+                             "term). The global term correlates sigma inflation "
+                             "across weights and accelerates weight-magnitude "
+                             "runaway on draw plateaus.")
+    parser.add_argument("--checkpoint-dir", type=str, default=None,
+                        help="Directory for population/best checkpoints "
+                             "(default: 'checkpoints'). Give long runs their own "
+                             "dir so they don't overwrite earlier runs' files.")
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to a population checkpoint (.pt) to resume from. "
                              "--generations is interpreted as additional gens to run.")
@@ -449,14 +502,17 @@ def main():
         for attr, val in paper_defaults.items():
             if getattr(args, attr) is None:
                 setattr(args, attr, val)
-        # Paper-strict additions: (μ+μ) selection and plain alpha-beta.
+        # Paper-strict additions: (μ+μ) selection, plain alpha-beta, and the
+        # paper's single-tau sigma rule (no correlated global noise term).
         if args.selection_scheme is None:
             args.selection_scheme = "mu_plus_mu"
         if not args.no_quiescence:
             args.no_quiescence = True
+        if args.sigma_update is None:
+            args.sigma_update = "single-tau"
         print("  [preset] paper-2001-strict (true Chellapilla & Fogel 2001 copy) - "
               "arch=anaconda-2001, pop=15, games=5, depth=4, random pairing, "
-              "+1/0/-2, sigma=0.05, no sigma ceiling, "
+              "+1/0/-2, sigma=0.05, no sigma ceiling, sigma rule=single-tau, "
               "selection=(mu+mu) (2*mu pool each gen), quiescence=OFF. "
               "Expect ~2x the tournament compute per gen vs paper-2001.")
 
@@ -484,6 +540,7 @@ def main():
     _fill_from_resume("win_score", "evolution", "win_score", None)
     _fill_from_resume("initial_sigma", "evolution", "initial_sigma", None)
     _fill_from_resume("max_sigma", "evolution", "max_sigma", None)
+    _fill_from_resume("sigma_update", "evolution", "sigma_update", None)
 
     # Architecture: prefer an explicit --architecture; otherwise read from
     # checkpoint (top-level key first, then nested config.network); finally
@@ -548,6 +605,11 @@ def main():
         config.evolution.initial_sigma = args.initial_sigma
     if args.max_sigma is not None:
         config.evolution.max_sigma = args.max_sigma
+    if args.sigma_update is not None:
+        # Checkpoints store the underscore form; the CLI takes dashes.
+        config.evolution.sigma_update = args.sigma_update.replace("-", "_")
+    if args.checkpoint_dir is not None:
+        config.training.checkpoint_dir = args.checkpoint_dir
     config.training.resume_from = args.resume
     config.training.tournament = args.tournament
     if args.selection_scheme is not None:
