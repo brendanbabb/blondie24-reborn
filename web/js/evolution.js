@@ -15,11 +15,15 @@
  *
  * Barrier-cost experiments (2026-07, 24-thread hybrid-core box, 8 workers) —
  * measured via the per-gen genStats diagnostics below:
- *   - In-worker game time sums to ~1,050 ms/gen but genMs is ~170 ms; the
- *     gap to the ideal makespan max(sum/8, longest game) is only ~35 ms
- *     (~20%). The dominant "loss" is that games run ~2.5× slower inside 8
- *     concurrent workers than the same code single-threaded (all-core
- *     clocks + E-core placement) — physics, not scheduling.
+ *   - CAVEAT discovered later: these experiments ran with the browser window
+ *     UNFOCUSED, where Windows 11 EcoQoS demotes worker threads to E-cores.
+ *     Focused (how people actually play), the same build runs ~51 ms/gen
+ *     (~18.7 gens/sec) — near-ideal parallel efficiency. Benchmark workers
+ *     with the window foreground.
+ *   - In-worker game time sums to ~1,050 ms/gen but genMs is ~170 ms
+ *     (unfocused); the gap to the ideal makespan max(sum/8, longest game)
+ *     is only ~35 ms (~20%). The rest of the unfocused "loss" was the
+ *     EcoQoS effect above, not scheduling.
  *   - The ~35 ms residual is TAIL PACKING: in the last round each worker
  *     holds 2-3 variable-length games and early finishers idle.
  *   - Double-buffering (keep 2 games queued per worker while the queue is

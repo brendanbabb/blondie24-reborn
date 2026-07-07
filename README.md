@@ -94,20 +94,22 @@ Every AI turn, for ~2 seconds:
 Network weights — including the piece-difference bypass — are initialized from **N(0, σ)**
 with σ=0.05, exactly as in the paper. No hand-seeded "material bias" to bootstrap early play:
 gen-0 networks play chaotically and selection finds the useful weights on its own. After
-clicking New game the worker runs **3 warmup generations** before the first move so the AI
+clicking New game the demo runs **5 warmup generations** before the first move so the AI
 at least isn't literally random on move 1.
 
-At 2 seconds per AI turn at depth 4, the browser typically fits **~4–8 generations** per turn
-(the JS search uses make/unmake, a per-search Zobrist transposition table, and iterative
-deepening with TT-move-first ordering — all correctness-preserving speed-ups; see
-[`web/README.md`](./web/README.md) for details). Across ~30 AI moves in a game, the
-population runs through **~100–240 generations** total. The paper reached Class-A play at
-~250 generations, so one casual play session covers a meaningful slice of the A-class learning
-curve.
+At 2.5 seconds per AI turn at depth 4, the browser typically fits **~45–50 generations**
+per turn on a modern desktop (fewer on modest hardware). The self-play tournament fans out
+across a pool of 4–8 Web Workers with pull dispatch, and the JS search uses make/unmake, a
+per-search Zobrist transposition table, and iterative deepening with TT-move-first ordering
+— all correctness-preserving speed-ups; see [`web/README.md`](./web/README.md) for details
+and measured numbers. Across ~30 AI moves in a game, the population can run through
+**~1,000+ generations** total — several times the ~250 the paper needed to reach Class-A
+play (at much smaller population and games-per-individual scale, so don't expect Class-A
+from one session).
 
-When the AI's 2 seconds are up, the current top-ranked network runs **depth-4 minimax** from
-the board you see and plays its move. Evolution pauses while you think, so the opponent you
-face at any point is frozen — it only changes between AI turns.
+When the AI's 2.5 seconds are up, the current top-ranked network runs **depth-4 minimax**
+from the board you see and plays its move. Evolution pauses while you think, so the opponent
+you face at any point is frozen — it only changes between AI turns.
 
 > **A note on the name.** "Blondie24" is the screen name used on Zone.com by the 2001 "Anaconda"
 > system (Chellapilla & Fogel 2001), which added a spatial-preprocessing layer on top of the 1999

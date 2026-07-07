@@ -76,13 +76,21 @@ dropping to 1 near the tail so late games go to whichever worker frees up first.
 Generations are a barrier (gen N+1's population needs gen N's full ranking); a
 `reset()` mid-gen bumps an epoch counter and in-flight results are dropped by tag.
 
-Barrier-cost findings (measured via the `genStats` field on gen events): the gap
-between actual gen time and the ideal makespan `max(gameMsSum/pool, gameMsMax)` is
-only ~20% and is tail-packing fragmentation; the bigger effect is that games run
-~2.5× slower across 8 concurrent workers than single-threaded (all-core clocks +
-E-cores). Hedged tail dispatch (racing duplicates of stragglers,
-`create({hedge: true})`) measured neutral — a duplicate replays from move 0 and
-rarely beats a nearly-done straggler — so it's off by default.
+Measured throughput (24-thread hybrid-core desktop, 8 workers, depth-4 self-play):
+**~51 ms/gen ≈ 18.7 gens/sec with the window focused** — ~45–50 generations per
+2.5 s AI turn, vs ~6 for the original single-worker design. Two hard-won
+measurement lessons, via the `genStats` field on gen events:
+
+- **Window focus dominates worker benchmarks.** The same build measured
+  ~142 ms/gen with Chrome unfocused: Windows 11 EcoQoS demotes background-window
+  threads to E-cores. An earlier conclusion that "games run ~2.5× slower inside
+  workers — physics" was largely this artifact. Benchmark with the window
+  foreground.
+- The gap between actual gen time and the ideal makespan
+  `max(gameMsSum/pool, gameMsMax)` is small and is tail-packing fragmentation.
+  Hedged tail dispatch (racing duplicates of stragglers, `create({hedge: true})`)
+  measured neutral — a duplicate replays from move 0 and rarely beats a
+  nearly-done straggler — so it's off by default.
 
 Main-thread API (`Evolution.create({onGen, onError})`):
 
