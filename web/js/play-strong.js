@@ -34,8 +34,8 @@
     {
       id: "paper-strict",
       label: "Paper-strict",
-      weightsUrl: "weights/anaconda-paper-strict.bin?v=32",
-      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=32",
+      weightsUrl: "weights/anaconda-paper-strict.bin?v=33",
+      metaUrl:    "weights/anaconda-paper-strict.meta.json?v=33",
       available:  true,
     },
     {

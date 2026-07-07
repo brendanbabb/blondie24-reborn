@@ -1,8 +1,8 @@
 {
-  "source": "checkpoint: best_gen0500.pt (from 2000-gen paper-2001-strict run)",
+  "source": "checkpoint: best_gen0350.pt (from 850-gen paper-2001-strict single-tau run, 2026-07-06)",
   "architecture": "Anaconda (2001)",
   "arch_key": "2001",
   "nWeights": 5048,
-  "generations": 500,
-  "note": "Shipped gen 500 instead of gen 2000 from a paper-2001-strict run. Paper-strict uses unbounded sigma; by gen 850+ the network's tanh outputs saturate to +1 everywhere (score spread collapses to <0.01), making minimax useless. Gen 500 has the strongest position discrimination (fixture-score spread 1.66; max |w| ~19 is still within tanh's useful range)."
+  "generations": 350,
+  "note": "Paper-2001-strict with the paper's actual sigma rule (single-tau, no correlated global noise) and king weight K initialized at 2.0 / clamped to [1,3]. Gen 350 is the run's healthiest checkpoint by fixture-score spread (1.25; max |w| 8.0). Beats the previously shipped gen-500 two-factor champion 41W/6L/53D at depth 6 (100 games, 6 random opening plies)."
 }
