@@ -1,15 +1,15 @@
 /*
  * Main game loop and UI glue.
  *
- * Milestone 3: evolution runs in a Web Worker. On each AI turn:
- *   1. Resume evolution for ~1s (gens accumulate in the worker).
- *   2. Pause, request a snapshot of the top-ranked weights.
+ * Evolution runs on a pull-dispatch pool of 4-6 game workers, coordinated
+ * from the main thread by evolution.js. On each AI turn:
+ *   1. Resume evolution for ~3s (gens accumulate across the pool).
+ *   2. Pause, snapshot the top-ranked weights at the next gen boundary.
  *   3. Run depth-4 minimax locally with that snapshot.
  *   4. Commit the move. The gen counter reflects the gen that moved.
  *
- * During the human's turn, evolution is paused. Gens in the worker only
- * accumulate during AI-turn bursts. A full 30-move game yields ~30 seconds of
- * evolution total.
+ * During the human's turn, evolution is paused. Gens only accumulate during
+ * AI-turn bursts. A full 30-move game yields ~30 seconds of evolution total.
  */
 
 (function () {
@@ -74,113 +74,95 @@
     turnBoundaries: [],   // generation numbers at which each AI turn started
   };
 
-  // ---- Worker setup ---------------------------------------------------------
+  // ---- Evolution coordinator (main thread) + game-worker pool ---------------
 
-  const worker = new Worker("js/worker.js?v=7");
-  let pendingSnapshot = null;  // Promise resolver while a snapshot is in flight
-
-  worker.onerror = (ev) => {
-    console.error("Worker error:", ev.message || ev);
-    showBanner("error", "Training worker crashed: " + (ev.message || "unknown"));
-  };
-
-  worker.onmessage = (ev) => {
-    const msg = ev.data;
-    if (msg.type === "ready") {
-      // Worker initialized at gen 0; nothing to do here.
-      return;
-    }
-    if (msg.type === "gen") {
-      state.latestGen = msg.gen;
-      // Warmup: evolve PRETRAIN_GENS generations before the first human/AI move.
-      if (state.preTraining && msg.gen >= state.preTrainingStartGen + PRETRAIN_GENS) {
-        state.preTraining = false;
-        state.aiThinking = false;
-        worker.postMessage({ type: "pause" });
-        log(`Warmup done at gen ${msg.gen}. Game starts now.`);
-        updateButtons();
-        maybeStartAiTurn();
-        // Fall through so the gen stats still get recorded below.
-      }
-      // Don't count warmup gens as part of an AI-turn burst — turn stats
-      // only track the per-turn 3s windows that happen during real play.
-      if (state.aiThinking && !state.preTraining) {
-        state.turnGens.push({
-          gen: msg.gen,
-          meanFitness: msg.meanFitness,
-          maxFitness: msg.maxFitness,
-          leaderboard: msg.leaderboard,
-        });
-        // Also append to the cumulative game-long history. Skip the gen 0
-        // reset ping (meanFitness and maxFitness are both 0 before any
-        // tournament has run).
-        if (msg.gen > 0) {
-          state.historyGens.push({
-            gen: msg.gen,
-            meanFitness: msg.meanFitness,
-            maxFitness: msg.maxFitness,
-          });
-          renderHistoryChart();
-        }
-        const delta = msg.gen - state.turnStartGen;
-        document.getElementById("gen-delta").textContent = "+" + delta + " this turn";
-        const elapsed = (performance.now() - state.genBurstStart) / 1000;
-        if (elapsed > 0) {
-          const gps = delta / elapsed;
-          // Append the most recent gen's wall-clock ms so the user can see
-          // per-gen latency, not just averaged rate. Helps diagnose browser
-          // vs. Node throughput when the numbers diverge.
-          const genMsStr = (typeof msg.genMs === "number") ? ` (${msg.genMs.toFixed(0)} ms/gen)` : "";
-          document.getElementById("gens-per-sec").textContent = gps.toFixed(1) + genMsStr;
-        }
-      }
-      document.getElementById("gen-counter").textContent = "gen " + msg.gen;
-      renderLeaderboard(msg.leaderboard);
-      // A newer sample invalidates the old play-count for that slot, so the
-      // 2-runs-per-slot cap restarts fresh. If both slots were halted, bring
-      // the replay panel back to life on the fresher sample.
-      if (msg.sampleGameA) {
-        state.latestSampleGameA = msg.sampleGameA;
-        state.miniPlayCounts.A = 0;
-      }
-      if (msg.sampleGameB) {
-        state.latestSampleGameB = msg.sampleGameB;
-        state.miniPlayCounts.B = 0;
-      }
-      if ((msg.sampleGameA || msg.sampleGameB) && state.miniHalted) {
-        state.miniHalted = false;
-        startMiniPlayback(state.miniSlot || "A");
-      }
-      return;
-    }
-    if (msg.type === "snapshot") {
-      if (pendingSnapshot) {
-        pendingSnapshot(msg);
-        pendingSnapshot = null;
-      }
-      return;
-    }
-    if (msg.type === "error") {
-      console.error("Worker-reported error:", msg.message, msg.stack);
-      showBanner("", "Training worker error: " + msg.message + ". Click New Game to reset.");
+  const evo = Evolution.create({
+    onGen: handleGen,
+    onError: (message) => {
+      console.error("Evolution error:", message);
+      showBanner("", "Training error: " + message + ". Click New Game to reset.");
       state.aiThinking = false;
       state.preTraining = false;
       updateButtons();
-      return;
+    },
+  });
+
+  // Fires once per completed generation (and once with gen 0 after a reset).
+  function handleGen(msg) {
+    state.latestGen = msg.gen;
+    // Warmup: evolve PRETRAIN_GENS generations before the first human/AI move.
+    if (state.preTraining && msg.gen >= state.preTrainingStartGen + PRETRAIN_GENS) {
+      state.preTraining = false;
+      state.aiThinking = false;
+      evo.pause();
+      log(`Warmup done at gen ${msg.gen}. Game starts now.`);
+      updateButtons();
+      maybeStartAiTurn();
+      // Fall through so the gen stats still get recorded below.
     }
-  };
+    // Don't count warmup gens as part of an AI-turn burst — turn stats
+    // only track the per-turn 3s windows that happen during real play.
+    if (state.aiThinking && !state.preTraining) {
+      state.turnGens.push({
+        gen: msg.gen,
+        meanFitness: msg.meanFitness,
+        maxFitness: msg.maxFitness,
+        leaderboard: msg.leaderboard,
+      });
+      // Also append to the cumulative game-long history. Skip the gen 0
+      // reset ping (meanFitness and maxFitness are both 0 before any
+      // tournament has run).
+      if (msg.gen > 0) {
+        state.historyGens.push({
+          gen: msg.gen,
+          meanFitness: msg.meanFitness,
+          maxFitness: msg.maxFitness,
+        });
+        renderHistoryChart();
+      }
+      const delta = msg.gen - state.turnStartGen;
+      document.getElementById("gen-delta").textContent = "+" + delta + " this turn";
+      const elapsed = (performance.now() - state.genBurstStart) / 1000;
+      if (elapsed > 0) {
+        const gps = delta / elapsed;
+        // Append the most recent gen's wall-clock ms so the user can see
+        // per-gen latency, not just averaged rate. With the worker pool this
+        // is parallel wall-clock time, not single-thread CPU time.
+        const genMsStr = (typeof msg.genMs === "number") ? ` (${msg.genMs.toFixed(0)} ms/gen)` : "";
+        document.getElementById("gens-per-sec").textContent = gps.toFixed(1) + genMsStr;
+      }
+    }
+    document.getElementById("gen-counter").textContent = "gen " + msg.gen;
+    renderLeaderboard(msg.leaderboard);
+    // A newer sample invalidates the old play-count for that slot, so the
+    // 2-runs-per-slot cap restarts fresh. If both slots were halted, bring
+    // the replay panel back to life on the fresher sample.
+    if (msg.sampleGameA) {
+      state.latestSampleGameA = msg.sampleGameA;
+      state.miniPlayCounts.A = 0;
+    }
+    if (msg.sampleGameB) {
+      state.latestSampleGameB = msg.sampleGameB;
+      state.miniPlayCounts.B = 0;
+    }
+    if ((msg.sampleGameA || msg.sampleGameB) && state.miniHalted) {
+      state.miniHalted = false;
+      startMiniPlayback(state.miniSlot || "A");
+    }
+  }
 
   function snapshot() {
+    // evo.snapshot() resolves at the next generation boundary. Safety
+    // timeout in case a game worker dies mid-gen and the boundary never
+    // arrives.
     return new Promise((resolve, reject) => {
-      // Generous timeout: deep-depth endgame gens can keep the worker busy for
-      // several seconds; pause + snapshot can't run until the current gen
-      // finishes because each gen is a synchronous chunk of CPU work.
       const timeoutId = setTimeout(() => {
-        if (pendingSnapshot) pendingSnapshot = null;
         reject(new Error("snapshot timeout after 8s"));
       }, 8000);
-      pendingSnapshot = (msg) => { clearTimeout(timeoutId); resolve(msg); };
-      worker.postMessage({ type: "snapshot" });
+      evo.snapshot().then(
+        (snap) => { clearTimeout(timeoutId); resolve(snap); },
+        (err)  => { clearTimeout(timeoutId); reject(err); },
+      );
     });
   }
 
@@ -536,8 +518,8 @@
     }
     renderHistoryChart();
 
-    // Send the worker back to gen 0 for a fresh run.
-    worker.postMessage({ type: "reset" });
+    // Send the population back to gen 0 for a fresh run.
+    evo.reset();
 
     document.getElementById("gen-counter").textContent = "gen 0";
     document.getElementById("gen-delta").textContent = "+0 this turn";
@@ -557,9 +539,9 @@
     updatePieceCounts();
     updateButtons();
     if (autoStart) {
-      // Kick off the warmup: resume the worker, watch for gen >= PRETRAIN_GENS
+      // Kick off the warmup: resume evolution, watch for gen >= PRETRAIN_GENS
       // in the gen-event handler, then pause and start the actual game.
-      worker.postMessage({ type: "resume" });
+      evo.resume();
     }
   }
 
@@ -729,8 +711,11 @@
   }
 
   function commitMove(move, actor) {
+    // Captures sit at odd indices of jump moves [from, cap, land, ...]. The
+    // `- 1` keeps a slide's destination (move[1] when length === 2) out of
+    // the captured list.
     const captured = [];
-    for (let i = 1; i < move.length; i += 2) captured.push(move[i]);
+    for (let i = 1; i < move.length - 1; i += 2) captured.push(move[i]);
 
     state.board = C.applyMove(state.board, move);
     state.lastFrom = move[0];
@@ -811,9 +796,9 @@
     log("AI is training…");
     updateButtons();
 
-    // Resume evolution in the worker. After TRAIN_BURST_MS, pause, snapshot,
-    // search, and commit.
-    worker.postMessage({ type: "resume" });
+    // Resume evolution across the pool. After TRAIN_BURST_MS, pause,
+    // snapshot, search, and commit.
+    evo.resume();
     setTimeout(onTrainBurstEnd, TRAIN_BURST_MS);
   }
 
@@ -824,7 +809,7 @@
     state.aiEvolveMs += performance.now() - state._evolveStart;
     updateAiTimeDisplay();
 
-    worker.postMessage({ type: "pause" });
+    evo.pause();
 
     let snap;
     const snapStart = performance.now();

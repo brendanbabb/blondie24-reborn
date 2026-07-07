@@ -8,8 +8,8 @@ self-play on every AI turn, then picks its move with the freshly-evolved champio
 
 This `web/` tree is treated as **independent code** from the Python training stack
 (`checkers/ evolution/ neural/ search/ training/`). The evolve-as-it-plays page
-(`index.html` + `js/main.js` + `js/worker.js` + `js/network.js` + `js/minimax.js` +
-`js/checkers.js`) does its own in-browser EP loop — it is **not** expected to stay
+(`index.html` + `js/main.js` + `js/evolution.js` + `js/game-worker.js` +
+`js/network.js` + `js/minimax.js` + `js/checkers.js`) does its own in-browser EP loop — it is **not** expected to stay
 bit-compatible with the Python engine, and changes on either side do not need to be
 mirrored.
 
@@ -44,9 +44,12 @@ web/
 │                             transposition table, and iterative deepening + TT-move-first
 │                             ordering; capture-length move ordering as fallback
 ├── js/render.js            main board canvas renderer + mini-board (for the self-play replay)
-├── js/worker.js            Web Worker: EP loop, pop=6, games-per-ind=3, flat depth-4
-│                             self-play (paper-faithful), records all games each gen and
-│                             picks decisive strong-vs-weak pairings for the replay
+├── js/evolution.js         main-thread EP coordinator: pop=6, games-per-ind=3 pairings,
+│                             fitness, half-keep-mutate selection; pull-dispatches the 18
+│                             games/gen to a pool of 4-6 game workers; records all games
+│                             and picks decisive strong-vs-weak pairings for the replay
+├── js/game-worker.js       stateless Web Worker: plays ONE flat depth-4 self-play game
+│                             per message (paper-faithful), caches Network wrappers per gen
 └── js/main.js              UI glue: click-to-move, forced-jump enforcement, training panel,
                               live leaderboard (currently hidden), eval bar, self-play
                               replay, network-architecture viz, move history,
@@ -54,49 +57,68 @@ web/
                               square notation
 ```
 
-## Worker message protocol
+## Evolution architecture
 
-Main thread sends to worker:
+The EP loop (pairings, fitness, selection, mutation — microseconds per gen) runs on the
+**main thread** in `js/evolution.js`. The expensive part — 18 independent self-play games
+per generation — fans out to a pool of 4-6 stateless **game workers** (`js/game-worker.js`,
+pool size = `clamp(hardwareConcurrency - 2, 4, 6)`).
 
-| Message | Effect |
+Dispatch is **pull-based**: each worker holds one game at a time and is handed the next
+from the queue when its result arrives, so one 80-move shuffle-draw only ever strands one
+worker. Generations are a barrier (gen N+1's population needs gen N's full ranking); a
+`reset()` mid-gen bumps an epoch counter and in-flight results are dropped by tag.
+
+Main-thread API (`Evolution.create({onGen, onError})`):
+
+| Call | Effect |
 |---|---|
-| `{type: "reset"}` | Re-initialize population at gen 0, posts a gen-0 gen event. |
-| `{type: "resume"}` | Begin/resume evolving (schedules runOneGen via setTimeout 0). |
-| `{type: "pause"}` | Stop evolving after the current gen. |
-| `{type: "snapshot"}` | Reply with the current champion's weights + sigmas + fitness. |
+| `evo.reset()` | Re-initialize population at gen 0, emits a gen-0 gen event (async). |
+| `evo.resume()` | Run generations back-to-back until `pause()`. |
+| `evo.pause()` | Stop after the in-flight generation completes. |
+| `evo.snapshot()` | Promise of the champion's `{gen, weights, sigmas, fitness}`, resolved at the next gen boundary. |
 
-Worker sends to main:
+`onGen` fires per completed generation with
+`{gen, leaderboard, meanFitness, maxFitness, sampleGameA, sampleGameB, genMs}`.
+`sampleGameA/B` are recorded self-play games (frames + B/W idx + ranks + winner) chosen
+from the tournament, preferring decisive + wide-rank-gap games. Worker↔coordinator
+messages (`weights` broadcast per gen, `play`/`result` per game) are internal to
+evolution.js/game-worker.js; frames come back as transferables.
 
-| Message | Effect |
-|---|---|
-| `{type: "ready", gen: 0}` | Sent once on load after `initPopulation`. |
-| `{type: "gen", gen, leaderboard, meanFitness, maxFitness, sampleGameA, sampleGameB}` | Per-gen stats. `sampleGameA/B` are recorded self-play games (frames + B/W idx + ranks + winner) chosen from the tournament, preferring decisive + wide-rank-gap games. |
-| `{type: "snapshot", gen, weights, sigmas, fitness}` | Response to a snapshot request. |
-| `{type: "error", message, stack}` | Any exception inside the gen loop. Main surfaces this in the status banner so silent hangs become visible. |
+`pause` and `snapshot` take effect at the next **generation boundary** (the in-flight
+games must finish so the population stays consistent). The main thread's snapshot promise
+keeps an 8-second safety timeout in case a game worker dies mid-gen.
 
-`pause` and `snapshot` only take effect **between** gens (each gen is a synchronous chunk
-of worker CPU), so deep-depth endgame gens can stall response by up to ~3 seconds. The
-main thread's snapshot promise has an 8-second timeout to absorb that.
+The coordinator/pool protocol is guarded by `node web/pool_test.js` (fake-Worker shim
+around the real game-worker.js): per-gen W/L/D accounting, pause/snapshot at the
+boundary, mid-gen reset staleness, and re-entrant pause+resume from inside onGen (the
+warmup flow) — the last one wedged the pool before the genInFlight guard existed.
 
 ## Key constants you might want to tweak
 
-In `web/js/worker.js`:
+In `web/js/evolution.js`:
 
 ```js
 POP_SIZE             = 6     // networks per generation
 GAMES_PER_INDIVIDUAL = 3     // self-play games per network per gen
-TRAIN_SEARCH_DEPTH   = 4     // paper-faithful flat depth for self-play
-MAX_GAME_MOVES       = 80    // self-play draw cap
 WIN_SCORE  =  1.0            // paper fitness
 DRAW_SCORE =  0.0
 LOSS_SCORE = -2.0            // paper's asymmetric loss penalty
+POOL_MIN / POOL_MAX  = 4 / 6 // game-worker pool bounds
+```
+
+In `web/js/game-worker.js`:
+
+```js
+TRAIN_SEARCH_DEPTH   = 4     // paper-faithful flat depth for self-play
+MAX_GAME_MOVES       = 80    // self-play draw cap
 ```
 
 In `web/js/main.js`:
 
 ```js
 AI_DEPTH            = 4     // depth for the move the AI plays against you
-TRAIN_BURST_MS      = 3000  // how long the worker evolves between AI moves
+TRAIN_BURST_MS      = 3000  // how long evolution runs per AI turn
 MIN_SEARCH_PAD_MS   = 200   // UX pad so the AI doesn't snap-move instantly
 PRETRAIN_GENS       = 5     // warmup gens run when you click New game
 MINI_STEP_MS        = 220   // ms per frame in the self-play replay animation
@@ -123,8 +145,10 @@ The demo deliberately stays close to Chellapilla & Fogel 1999:
 
 ## What's intentionally not there
 
-- **No build step / bundler.** Three `<script>` tags, one Worker file. Edit and refresh.
-- **No framework / dependencies.** Pure DOM + Canvas + Web Worker.
+- **No build step / bundler.** A handful of `<script>` tags, one Worker file. Edit and refresh.
+- **No framework / dependencies.** Pure DOM + Canvas + Web Workers. No SharedArrayBuffer
+  (weights are ~7 KB, structured clone is trivial), so no COOP/COEP headers needed —
+  deploys on GitHub Pages as-is.
 - **No network calls.** Everything runs client-side. You can serve over `file://` if your
   browser permits Web Workers from there (most don't, hence the `python -m http.server`
   line above).
@@ -132,9 +156,9 @@ The demo deliberately stays close to Chellapilla & Fogel 1999:
   main Python repo's writeup flags this as the likely cause of the draw-plateau failure mode
   at deeper self-play; the demo is shallow enough not to hit it, but adding a frozen
   strongest-ever anchor opponent would be the natural next lever.
-- **No parallel workers.** One Worker, one CPU core. Splitting the 18 games/gen across two
-  Workers would roughly double gens/sec on any multi-core machine — but we haven't needed
-  it yet.
+- **No evolution during the human's turn.** Deliberate: gens only accumulate in the
+  per-AI-turn 3-second bursts, so the gen counter reflects training the AI "earned"
+  during play, not how long the human stared at the board.
 
 ## Relationship to the Python repo
 

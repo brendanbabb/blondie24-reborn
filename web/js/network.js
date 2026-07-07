@@ -101,20 +101,37 @@
     const h1 = new Float32Array(40);
     const h2 = new Float32Array(10);
 
+    // Transposed copy of W1 ([32×40] column-contiguous) built once per
+    // wrapper. fc1 is computed input-major — for each OCCUPIED square, add
+    // its column into the accumulator — so empty squares (8..20+ of the 32,
+    // and adding exact 0.0 never changes a float) cost nothing. Safe because
+    // nothing mutates a weights vector after wrapping (mutate() returns new
+    // arrays). Accumulation runs in Float64 in the same ascending-j order as
+    // the old row-major dot product, so outputs are bit-identical.
+    const w1t = new Float32Array(32 * 40);
+    for (let i = 0; i < 40; i++) {
+      for (let j = 0; j < 32; j++) w1t[j * 40 + i] = w[OFF_W1 + i * 32 + j];
+    }
+    const acc1 = new Float64Array(40);
+
     function forward(board) {
       const kw = w[OFF_KING];
-      const x = _inBuf;
-      encodeInPlace(board, kw, x);
+      const sq = board.squares;
+      const side = board.currentPlayer;
 
-      // fc1: h1 = tanh(W1 x + b1)
+      // fc1: h1 = tanh(W1 x + b1), input-major over occupied squares only.
       let pdSum = 0;
-      for (let i = 0; i < 40; i++) {
-        let acc = w[OFF_B1 + i];
-        const rowOff = OFF_W1 + i * 32;
-        for (let j = 0; j < 32; j++) acc += w[rowOff + j] * x[j];
-        h1[i] = ftanh(acc);
+      for (let i = 0; i < 40; i++) acc1[i] = w[OFF_B1 + i];
+      for (let j = 0; j < 32; j++) {
+        const p = sq[j];
+        if (p === 0) continue;
+        let val = (p === 2 || p === -2) ? kw : 1.0;
+        if (p * side < 0) val = -val;
+        pdSum += val;
+        const colOff = j * 40;
+        for (let i = 0; i < 40; i++) acc1[i] += w1t[colOff + i] * val;
       }
-      for (let j = 0; j < 32; j++) pdSum += x[j];
+      for (let i = 0; i < 40; i++) h1[i] = ftanh(acc1[i]);
 
       // fc2: h2 = tanh(W2 h1 + b2)
       for (let i = 0; i < 10; i++) {

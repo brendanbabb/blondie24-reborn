@@ -131,12 +131,18 @@
     return slides;
   }
 
-  // Directions a piece may move in (index into NEIGHBORS 0..3).
+  // Directions a piece may move in (index into NEIGHBORS 0..3). Shared
+  // frozen constants — allowedDirs is called per piece per search node, so
+  // returning fresh array literals here was a top GC hotspot.
+  const DIRS_BLACK_MAN = [2, 3];       // black men go down
+  const DIRS_WHITE_MAN = [0, 1];       // white men go up
+  const DIRS_KING = [0, 1, 2, 3];
+  const DIRS_NONE = [];
   function allowedDirs(piece) {
-    if (piece === BLACK_PIECE)  return [2, 3];      // black men go down
-    if (piece === WHITE_PIECE)  return [0, 1];      // white men go up
-    if (piece === BLACK_KING || piece === WHITE_KING) return [0, 1, 2, 3];
-    return [];
+    if (piece === BLACK_PIECE)  return DIRS_BLACK_MAN;
+    if (piece === WHITE_PIECE)  return DIRS_WHITE_MAN;
+    if (piece === BLACK_KING || piece === WHITE_KING) return DIRS_KING;
+    return DIRS_NONE;
   }
 
   function collectSlidesFrom(sq, from, piece, out) {
@@ -224,11 +230,23 @@
     return next;
   }
 
+  // Allocate a reusable undo record for applyMoveInPlace. caps holds
+  // (square, piece) pairs; 12 captures max (opponent's whole army) → 24 slots.
+  function newUndo() {
+    return {
+      from: 0, fromPiece: 0, last: 0,
+      capsLen: 0, caps: new Int8Array(24),
+      prevPlayer: 0, prevMoveCount: 0,
+    };
+  }
+
   // Mutate `board` in place to apply `move`; return an undo record that
   // undoMove() consumes to restore the prior state exactly. Move format is
-  // identical to applyMove. Allocates only the small undo object (and a flat
-  // pairs array for jumps) — no Int8Array clone.
-  function applyMoveInPlace(board, move) {
+  // identical to applyMove. Pass a record from newUndo() as `undo` to avoid
+  // any allocation (the search pools one per ply); omitted, a fresh record
+  // is allocated — callers stashing many undos (tests) rely on that.
+  function applyMoveInPlace(board, move, undo) {
+    const u = undo || newUndo();
     const sq = board.squares;
     const from = move[0];
     const fromPiece = sq[from];
@@ -236,17 +254,18 @@
 
     let currentPiece = fromPiece;
     let last;
-    let caps = null;
+    let capsLen = 0;
+    const caps = u.caps;
 
     if (move.length === 2) {
       last = move[1];
       currentPiece = maybePromote(currentPiece, last);
     } else {
-      caps = [];
       for (let i = 1; i < move.length; i += 2) {
         const cap = move[i];
         const land = move[i + 1];
-        caps.push(cap, sq[cap]);
+        caps[capsLen++] = cap;
+        caps[capsLen++] = sq[cap];
         sq[cap] = EMPTY;
         currentPiece = maybePromote(currentPiece, land);
         last = land;
@@ -255,12 +274,16 @@
 
     sq[last] = currentPiece;
 
-    const prevPlayer = board.currentPlayer;
-    const prevMoveCount = board.moveCount;
-    board.currentPlayer = -prevPlayer;
-    board.moveCount = prevMoveCount + 1;
+    u.from = from;
+    u.fromPiece = fromPiece;
+    u.last = last;
+    u.capsLen = capsLen;
+    u.prevPlayer = board.currentPlayer;
+    u.prevMoveCount = board.moveCount;
+    board.currentPlayer = -u.prevPlayer;
+    board.moveCount = u.prevMoveCount + 1;
 
-    return { from, fromPiece, last, caps, prevPlayer, prevMoveCount };
+    return u;
   }
 
   // Reverse applyMoveInPlace using the returned undo record. Order matters
@@ -269,11 +292,9 @@
   function undoMove(board, undo) {
     const sq = board.squares;
     sq[undo.last] = EMPTY;
-    if (undo.caps !== null) {
-      const caps = undo.caps;
-      for (let i = 0; i < caps.length; i += 2) {
-        sq[caps[i]] = caps[i + 1];
-      }
+    const caps = undo.caps;
+    for (let i = 0; i < undo.capsLen; i += 2) {
+      sq[caps[i]] = caps[i + 1];
     }
     sq[undo.from] = undo.fromPiece;
     board.currentPlayer = undo.prevPlayer;
@@ -296,23 +317,53 @@
     return [b, w];
   }
 
+  // Cheap existence check: does the side to move have ANY legal move?
+  // Early-exits without enumerating jump chains — a move exists iff some
+  // piece has an empty neighbor in an allowed direction (slide) or an
+  // adjacent enemy with an empty landing square (first hop of a jump; the
+  // forced-jump rule never removes ALL moves, only filters slides).
+  // Used at search leaves, where full getLegalMoves enumeration was ~half
+  // the per-leaf cost.
+  function hasLegalMove(board) {
+    const sq = board.squares;
+    const side = board.currentPlayer;
+    for (let from = 0; from < 32; from++) {
+      const piece = sq[from];
+      if (piece === EMPTY || owner(piece) !== side) continue;
+      const dirs = allowedDirs(piece);
+      for (let i = 0; i < dirs.length; i++) {
+        const d = dirs[i];
+        const to = NEIGHBORS[from * 4 + d];
+        if (to === -1) continue;
+        const tp = sq[to];
+        if (tp === EMPTY) return true;
+        if (owner(tp) !== side) {
+          const land = JUMPS[from * 4 + d];
+          if (land !== -1 && sq[land] === EMPTY) return true;
+        }
+      }
+    }
+    return false;
+  }
+
   // Returns [gameOver, winner] where winner is BLACK, WHITE, or null for draw.
   // Only checks the win-by-no-moves condition; draw rules (repetition,
   // move cap) live at the game-loop level.
   function isGameOver(board) {
-    const moves = getLegalMoves(board);
-    if (moves.length === 0) {
+    if (!hasLegalMove(board)) {
       // Current player has no moves → they lose.
       return [true, -board.currentPlayer];
     }
     return [false, null];
   }
 
-  // Hash for repetition detection: squares bytes + currentPlayer.
+  // Key for repetition detection: squares bytes + currentPlayer. Piece codes
+  // (-2..2) map to distinct UTF-16 units via fromCharCode's ToUint16, so the
+  // 33-char string is injective over states — and ~10× cheaper to build than
+  // the old comma-joined decimal string.
   function stateKey(board) {
-    // TypedArray.toString for small arrays is fine; alt: encode as base64.
-    // We keep it plain for readability.
-    return Array.prototype.join.call(board.squares, ",") + "|" + board.currentPlayer;
+    return String.fromCharCode.apply(null, board.squares) +
+           (board.currentPlayer === BLACK ? "b" : "w");
   }
 
   global.Checkers = {
@@ -321,8 +372,8 @@
     rowColOf, sqOf,
     makeBoard, cloneBoard,
     getLegalMoves, applyMove,
-    applyMoveInPlace, undoMove,
+    applyMoveInPlace, undoMove, newUndo,
     owner, isKing, pieceCount,
-    isGameOver, stateKey,
+    isGameOver, hasLegalMove, stateKey,
   };
 })(typeof self !== "undefined" ? self : this);

@@ -109,25 +109,45 @@
     ttGen[idx] = currentTtGen;
   }
 
-  // Order moves: bigger captures first (forced-jump rules: when any jump
-  // exists every move IS a jump, so this ranks longer chains earlier). If
-  // the TT has a best-move hint for this position, bump it to index 0.
+  // Order moves IN PLACE: bigger captures first (forced-jump rules: when any
+  // jump exists every move IS a jump, so this ranks longer chains earlier).
+  // If the TT has a best-move hint for this position, bump it to index 0.
+  // Stable insertion sort — move lists are tiny (~8) and often pre-sorted, so
+  // this beats slice().sort() and skips the per-node array allocation. Callers
+  // must pass a list they own (negamax's fresh getLegalMoves result, or an
+  // explicit copy at the root).
   function orderMoves(moves, hintFrom, hintTo) {
-    if (moves.length <= 1) return moves;
-    const sorted = moves.slice().sort((a, b) => b.length - a.length);
-    if (hintFrom < 0) return sorted;
-    for (let i = 0; i < sorted.length; i++) {
-      const m = sorted[i];
+    const n = moves.length;
+    if (n <= 1) return moves;
+    for (let i = 1; i < n; i++) {
+      const m = moves[i];
+      let j = i - 1;
+      while (j >= 0 && moves[j].length < m.length) {
+        moves[j + 1] = moves[j];
+        j--;
+      }
+      moves[j + 1] = m;
+    }
+    if (hintFrom < 0) return moves;
+    for (let i = 0; i < n; i++) {
+      const m = moves[i];
       if (m[0] === hintFrom && m[m.length - 1] === hintTo) {
         if (i !== 0) {
-          const tmp = sorted[i];
-          for (let j = i; j > 0; j--) sorted[j] = sorted[j - 1];
-          sorted[0] = tmp;
+          for (let j = i; j > 0; j--) moves[j] = moves[j - 1];
+          moves[0] = m;
         }
-        return sorted;
+        return moves;
       }
     }
-    return sorted;
+    return moves;
+  }
+
+  // One reusable undo record per ply. Indexing by remaining `depth` is safe
+  // because the active apply/undo pairs on the recursion stack all sit at
+  // distinct depths (root at d, children at d-1, ...).
+  const undoPool = [];
+  function pooledUndo(d) {
+    return undoPool[d] || (undoPool[d] = C.newUndo());
   }
 
   // Per-search counters; reset at the start of every pickMove. Exposed so
@@ -198,7 +218,10 @@
     const probe = ttProbe(hash);
     const hintFrom = probe ? probe.bestFrom : -1;
     const hintTo   = probe ? probe.bestTo   : -1;
-    const moves = orderMoves(rawMoves, hintFrom, hintTo);
+    // Copy before ordering: rawMoves is shared across the ID iterations, and
+    // each iteration must order from the SAME original list (only the copy is
+    // hint-rotated). ~4 small allocations per pickMove — negligible.
+    const moves = orderMoves(rawMoves.slice(), hintFrom, hintTo);
 
     let bestMove = moves[0];
     let bestScore = -Infinity;
@@ -207,7 +230,7 @@
 
     for (let i = 0; i < moves.length; i++) {
       const m = moves[i];
-      const undo = C.applyMoveInPlace(board, m);
+      const undo = C.applyMoveInPlace(board, m, pooledUndo(depth));
       const s = -negamax(board, depth - 1, -beta, -alpha, network);
       C.undoMove(board, undo);
       if (s > bestScore) { bestScore = s; bestMove = m; }
@@ -239,15 +262,23 @@
       }
     }
 
+    if (depth === 0) {
+      // Leaves dominate the node count, so skip full jump-chain enumeration
+      // here — an O(pieces) existence check settles terminal-vs-eval.
+      if (!C.hasLegalMove(board)) {
+        // Side to move has no moves → they lost. (Same -WIN + (100 - depth)
+        // mate-distance formula as below, with depth = 0.)
+        return -WIN + 100;
+      }
+      searchStats.evaluated++;
+      return network.forward(board);
+    }
+
     const rawMoves = C.getLegalMoves(board);
     if (rawMoves.length === 0) {
       // Side to move has no moves → they lost.
       // Subtract depth so "mate in 1" is preferred over "mate in 3".
       return -WIN + (100 - depth);
-    }
-    if (depth === 0) {
-      searchStats.evaluated++;
-      return network.forward(board);
     }
 
     const moves = orderMoves(rawMoves, hintFrom, hintTo);
@@ -257,7 +288,7 @@
 
     for (let i = 0; i < moves.length; i++) {
       const m = moves[i];
-      const undo = C.applyMoveInPlace(board, m);
+      const undo = C.applyMoveInPlace(board, m, pooledUndo(depth));
       const s = -negamax(board, depth - 1, -beta, -alpha, network);
       C.undoMove(board, undo);
       if (s > best) {
