@@ -46,7 +46,7 @@ web/
 ├── js/render.js            main board canvas renderer + mini-board (for the self-play replay)
 ├── js/evolution.js         main-thread EP coordinator: pop=6, games-per-ind=3 pairings,
 │                             fitness, half-keep-mutate selection; pull-dispatches the 18
-│                             games/gen to a pool of 4-6 game workers; records all games
+│                             games/gen to a pool of 4-8 game workers; records all games
 │                             and picks decisive strong-vs-weak pairings for the replay
 ├── js/game-worker.js       stateless Web Worker: plays ONE flat depth-4 self-play game
 │                             per message (paper-faithful), caches Network wrappers per gen
@@ -61,8 +61,8 @@ web/
 
 The EP loop (pairings, fitness, selection, mutation — microseconds per gen) runs on the
 **main thread** in `js/evolution.js`. The expensive part — 18 independent self-play games
-per generation — fans out to a pool of 4-6 stateless **game workers** (`js/game-worker.js`,
-pool size = `clamp(hardwareConcurrency - 2, 4, 6)`).
+per generation — fans out to a pool of 4-8 stateless **game workers** (`js/game-worker.js`,
+pool size = `clamp(hardwareConcurrency - 2, 4, 8)`).
 
 Dispatch is **pull-based**: each worker holds one game at a time and is handed the next
 from the queue when its result arrives, so one 80-move shuffle-draw only ever strands one
@@ -104,7 +104,7 @@ GAMES_PER_INDIVIDUAL = 3     // self-play games per network per gen
 WIN_SCORE  =  1.0            // paper fitness
 DRAW_SCORE =  0.0
 LOSS_SCORE = -2.0            // paper's asymmetric loss penalty
-POOL_MIN / POOL_MAX  = 4 / 6 // game-worker pool bounds
+POOL_MIN / POOL_MAX  = 4 / 8 // game-worker pool bounds
 ```
 
 In `web/js/game-worker.js`:

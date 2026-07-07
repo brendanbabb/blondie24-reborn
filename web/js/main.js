@@ -1,7 +1,7 @@
 /*
  * Main game loop and UI glue.
  *
- * Evolution runs on a pull-dispatch pool of 4-6 game workers, coordinated
+ * Evolution runs on a pull-dispatch pool of 4-8 game workers, coordinated
  * from the main thread by evolution.js. On each AI turn:
  *   1. Resume evolution for ~2.5s (gens accumulate across the pool).
  *   2. Pause, snapshot the top-ranked weights at the next gen boundary.

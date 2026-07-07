@@ -49,11 +49,11 @@
   const DRAW_SCORE = 0.0;
   const LOSS_SCORE = -2.0;
 
-  // 4–6 workers: no benefit past ~9 (only 18 games/gen to hand out), and we
+  // 4–8 workers: no benefit past ~9 (only 18 games/gen to hand out), and we
   // leave headroom for the UI thread and OS. hardwareConcurrency overcounts
   // useful cores (hyperthreads, E-cores), hence the -2.
   const POOL_MIN = 4;
-  const POOL_MAX = 6;
+  const POOL_MAX = 8;
 
   function now() {
     return (typeof performance !== "undefined") ? performance.now() : Date.now();
