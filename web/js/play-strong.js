@@ -19,7 +19,14 @@
   const A = self.AnacondaNetwork;
   const M = self.Minimax;
 
-  const AI_DEPTH = 6;
+  // Search strength: the user-selected depth is a FLOOR (always completed,
+  // so worst-case latency matches the old fixed-depth search); iterative
+  // deepening then continues toward AI_MAX_DEPTH while the elapsed time
+  // stays inside the budget (see minimax.js pickMove opts). Endgames
+  // routinely hit depth 12-14; sharp middlegames stop at the floor.
+  const AI_DEPTH_FLOOR_DEFAULT = 6;
+  const AI_MAX_DEPTH = 14;
+  const AI_BUDGET_MS = 1200;
   const MIN_SEARCH_PAD_MS = 200;       // UX pad so fast endgames don't snap-move
   const THINKING_YIELD_MS = 20;        // paint the "AI is thinking…" banner before blocking
   const PLAN_PLIES = 6;                // # of mini-boards in the AI's-plan strip
@@ -88,6 +95,8 @@
     aiMoveCount: 0,
     aiThinkMs: 0,                // cumulative search time
     gameActive: false,
+    aiDepthFloor: AI_DEPTH_FLOOR_DEFAULT,
+    openingPlies: 0,             // random plies applied at New game (0 = standard start)
   };
 
   // ---- Logging helpers ----
@@ -384,7 +393,7 @@
     }
 
     state.aiThinking = true;
-    log(`AI is thinking at depth ${AI_DEPTH}…`);
+    log(`AI is thinking (depth ${state.aiDepthFloor}+)…`);
     updateButtons();
 
     // Yield one paint so the banner updates before we block the main thread
@@ -393,7 +402,10 @@
     // latency of deep searches.
     setTimeout(() => {
       const searchStart = performance.now();
-      const result = M.pickMove(state.board, AI_DEPTH, state.aiNet);
+      const result = M.pickMove(state.board, state.aiDepthFloor, state.aiNet, {
+        budgetMs: AI_BUDGET_MS,
+        maxDepth: AI_MAX_DEPTH,
+      });
       const searchMs = performance.now() - searchStart;
       state.aiThinkMs += searchMs;
       state.aiMoveCount += 1;
@@ -415,6 +427,11 @@
           return;
         }
         commitMove(result.move, "AI");
+        // commitMove doesn't touch the move-log; without this the banner
+        // stays on "AI is thinking…" after the move lands.
+        if (!state.finished) {
+          log(`AI played ${describeMove(result.move)} (depth ${result.depthReached}) — your move.`);
+        }
       }, pad);
     }, THINKING_YIELD_MS);
   }
@@ -429,8 +446,9 @@
     }
     const ev = result.nodesEvaluated;
     const pr = result.nodesPruned;
+    const depthStr = result.depthReached ? `depth ${result.depthReached} · ` : "";
     el.textContent =
-      ev.toLocaleString() + " evals · " + pr.toLocaleString() + " α-β cuts";
+      depthStr + ev.toLocaleString() + " evals · " + pr.toLocaleString() + " α-β cuts";
   }
 
   // ---- AI's plan (principal variation) mini-board strip ----
@@ -672,6 +690,32 @@
     resignBtn.disabled    = !yourTurn;
   }
 
+  // ---- Random opening (ported from match.js) ----
+  // Plays N random legal plies from the start so repeat games against the
+  // deterministic champion don't replay identically. N is even, so the same
+  // side is to move afterwards and the "AI moves first / you move first"
+  // color semantics are preserved.
+  function applyRandomOpening(plies) {
+    let applied = 0;
+    for (let i = 0; i < plies; i++) {
+      const moves = C.getLegalMoves(state.board);
+      if (moves.length === 0) break;  // random walk dead-ended; play from here
+      const move = moves[Math.floor(Math.random() * moves.length)];
+      state.lastFrom = move[0];
+      state.lastTo = move[move.length - 1];
+      state.lastCaptured = [];
+      if (move.length > 2) {
+        for (let j = 1; j < move.length - 1; j += 2) state.lastCaptured.push(move[j]);
+      }
+      state.board = C.applyMove(state.board, move);
+      const key = C.stateKey(state.board);
+      state.stateCounts[key] = (state.stateCounts[key] || 0) + 1;
+      appendHistory(i % 2 === 0 ? "Opening (B)" : "Opening (W)", move);
+      applied++;
+    }
+    return applied;
+  }
+
   // ---- New game ----
   function resetGame(autoStart) {
     state.board = C.makeBoard();
@@ -683,14 +727,24 @@
     state.stateCounts = Object.create(null);
     state.finished = false;
     state.humanColor = humanColorSel.value;
+    state.aiDepthFloor = parseInt(strengthSel.value, 10) || AI_DEPTH_FLOOR_DEFAULT;
+    state.openingPlies = parseInt(openingSel.value, 10) || 0;
     state.gameActive = !!autoStart;
     state.aiThinking = false;
     state.aiMoveCount = 0;
     state.aiThinkMs = 0;
     updateThinkDisplay();
+    const depthLabel = document.getElementById("depth-label");
+    if (depthLabel) depthLabel.textContent = `${state.aiDepthFloor}+ plies (budgeted)`;
     moveHistoryEl.innerHTML = "";
+
+    let openingNote = "";
+    if (state.gameActive && state.openingPlies > 0) {
+      const applied = applyRandomOpening(state.openingPlies);
+      if (applied > 0) openingNote = ` (varied opening: ${applied} random plies)`;
+    }
     log(state.gameActive
-      ? "New game — your move."
+      ? `New game — your move.${openingNote}`
       : "Pick your color, then click New game to start.");
 
     render();
@@ -709,6 +763,12 @@
   askResignBtn.addEventListener("click", onAskResign);
   resignBtn.addEventListener("click", onResign);
   humanColorSel.addEventListener("change", () => resetGame(false));
+  const strengthSel = document.getElementById("strength-select");
+  const openingSel = document.getElementById("opening-select");
+  // Like the color picker: changing these mid-game just idles the board —
+  // they take effect on the next New game.
+  strengthSel.addEventListener("change", () => resetGame(false));
+  openingSel.addEventListener("change", () => resetGame(false));
 
   // Populate opponent dropdown.
   const opponentSel = document.getElementById("opponent-select");

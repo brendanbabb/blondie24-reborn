@@ -55,11 +55,14 @@
   }
 
   // ---- Transposition table (per-search) ----
-  // 16k entries × ~12 bytes = ~192 KB. Always-replace, indexed by low bits
+  // 128k entries × ~14 bytes = ~1.8 MB. Always-replace, indexed by low bits
   // of the Zobrist hash with a full-hash collision check on probe. The
   // generation counter avoids needing to clear the arrays between searches:
-  // an entry is valid only if ttGen[idx] === currentTtGen.
-  const TT_SIZE = 1 << 14;
+  // an entry is valid only if ttGen[idx] === currentTtGen. Sized for the
+  // time-budgeted searches on the play-strong page (depth 10-12, millions
+  // of nodes) — 16k entries thrashed there; the cost is trivial for the
+  // shallow demo searches.
+  const TT_SIZE = 1 << 17;
   const TT_MASK = TT_SIZE - 1;
 
   const FLAG_EXACT = 1;
@@ -154,11 +157,30 @@
   // callers (the play-strong UI) can show "search effort" stats.
   const searchStats = { evaluated: 0, pruned: 0 };
 
-  function pickMove(board, depth, network) {
+  function perfNow() {
+    return (typeof performance !== "undefined") ? performance.now() : Date.now();
+  }
+
+  // pickMove(board, depth, network[, opts])
+  //
+  // Without opts: plain iterative deepening 1..depth (unchanged behavior).
+  //
+  // opts = { budgetMs, maxDepth } enables time-budgeted deepening: `depth`
+  // becomes a guaranteed FLOOR (always completed, so worst-case latency
+  // matches a plain depth-N search), after which iterations continue up to
+  // maxDepth while elapsed time stays under ~45% of budgetMs. The 45% is
+  // predictive: with a TT the next iteration typically costs ~2-3× the total
+  // so far, so starting one past that point would overshoot the budget by
+  // more than it's worth. Endgames (tiny trees) hit maxDepth well inside the
+  // budget; sharp middlegames stop at the floor.
+  function pickMove(board, depth, network, opts) {
     const raw = C.getLegalMoves(board);
     if (raw.length === 0) {
-      return { move: null, score: -WIN, pv: [], nodesEvaluated: 0, nodesPruned: 0 };
+      return { move: null, score: -WIN, pv: [], depthReached: 0, nodesEvaluated: 0, nodesPruned: 0 };
     }
+
+    const budgetMs = (opts && opts.budgetMs) || 0;
+    const maxDepth = Math.max(depth, (opts && budgetMs && opts.maxDepth) || depth);
 
     ttBumpGen();
     searchStats.evaluated = 0;
@@ -166,15 +188,23 @@
 
     let bestMove = raw[0];
     let bestScore = -Infinity;
+    let depthReached = 0;
+    const t0 = perfNow();
 
     // Iterative deepening: each iteration's TT entries seed move ordering
     // for the next. Total cost is dominated by the final iteration (earlier
     // depths cost ~1/B, 1/B^2, ... of the deepest), so the overhead is small
     // and the better ordering at depth N typically more than pays it back.
-    for (let d = 1; d <= depth; d++) {
+    for (let d = 1; d <= maxDepth; d++) {
       const r = rootSearch(board, d, network, raw);
       bestMove = r.move;
       bestScore = r.score;
+      depthReached = d;
+      if (d >= depth) {
+        // Past the floor: a forced win/loss found — deeper won't change it.
+        if (bestScore >= WIN - 200 || bestScore <= -WIN + 200) break;
+        if (budgetMs > 0 && (perfNow() - t0) >= budgetMs * 0.45) break;
+      }
     }
 
     // Walk the TT from root to extract the AI's predicted line (principal
@@ -183,12 +213,13 @@
     // probe-able. Stops short if a probe misses or no move matches the
     // (from, to) hint (rare; can happen if a multi-jump's TT key was
     // overwritten by a sibling search).
-    const pv = extractPv(board, depth);
+    const pv = extractPv(board, depthReached);
 
     return {
       move: bestMove,
       score: bestScore,
       pv: pv,
+      depthReached: depthReached,
       nodesEvaluated: searchStats.evaluated,
       nodesPruned: searchStats.pruned,
     };

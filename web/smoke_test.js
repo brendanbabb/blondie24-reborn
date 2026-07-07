@@ -106,6 +106,20 @@ assert(r.move !== null, `pickMove returned null move`);
 assert(Number.isFinite(r.score), `pickMove returned non-finite score: ${r.score}`);
 console.log(`pickMove(d=4) -> score=${r.score.toFixed(4)} from=${r.move[0]} to=${r.move[r.move.length - 1]} (${dt}ms)`);
 
+// ---- Test 4b ----
+// Time-budgeted deepening: depth is a floor, iterations continue toward
+// maxDepth while under ~45% of the budget. Must return a legal move and a
+// depthReached of at least the floor.
+const rb = M.pickMove(board, 4, net1, { budgetMs: 250, maxDepth: 20 });
+assert(rb.move !== null, 'budgeted pickMove returned null move');
+assert(Number.isFinite(rb.score), `budgeted pickMove non-finite score: ${rb.score}`);
+assert(rb.depthReached >= 4 && rb.depthReached <= 20,
+  `budgeted depthReached out of range: ${rb.depthReached}`);
+const legalNow = C.getLegalMoves(board);
+assert(legalNow.some(m => m[0] === rb.move[0] && m[m.length - 1] === rb.move[rb.move.length - 1]),
+  'budgeted pickMove returned an illegal move');
+console.log(`budgeted pickMove(floor=4, budget=250ms) reached depth ${rb.depthReached}`);
+
 // ---- Test 5 ----
 // Quick self-play: 30 plies @ depth 4 between two random nets. Verifies the
 // search holds up over many calls (TT generation counter, no leaks).

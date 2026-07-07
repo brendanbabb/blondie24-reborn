@@ -20,7 +20,7 @@
  *     { type: "error", message, stack }
  */
 
-importScripts("checkers.js?v=8", "network.js?v=8", "minimax.js?v=8");
+importScripts("checkers.js?v=8", "network.js?v=8", "minimax.js?v=9");
 
 const C = self.Checkers;
 const N = self.Network;

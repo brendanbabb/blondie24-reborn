@@ -54,10 +54,12 @@
       </p>
       <p>
         No training happens while you play — the opponent is the fixed output
-        of that offline training run. The AI gets a <b>depth-6</b> minimax
-        search on every move, so it thinks a little longer than the live-evolve
-        demo's depth-4. That tends to take a second or two per move once the
-        middlegame opens up; endgames are faster.
+        of that offline training run. The AI's minimax search is
+        <b>time-budgeted</b>: it always completes the depth you pick in the
+        Strength selector (default 6), then keeps deepening — up to depth 14 —
+        while it's inside a ~1.2-second thinking budget. Quiet endgames
+        routinely reach depth 12+; sharp middlegames stop near the floor.
+        The "Last search" stat shows the depth actually reached each move.
       </p>
       <p>
         The model was trained with
@@ -86,6 +88,22 @@
           <select id="human-color">
             <option value="white">White (AI moves first)</option>
             <option value="black">Black (you move first)</option>
+          </select>
+        </label>
+        <label>
+          Strength
+          <select id="strength-select">
+            <option value="4">Quick (depth 4+)</option>
+            <option value="6" selected>Standard (depth 6+)</option>
+            <option value="8">Deep (depth 8+)</option>
+          </select>
+        </label>
+        <label>
+          Opening
+          <select id="opening-select">
+            <option value="0" selected>Standard start</option>
+            <option value="2">Varied (2 random plies)</option>
+            <option value="4">Varied (4 random plies)</option>
           </select>
         </label>
       </section>
@@ -121,7 +139,7 @@
           <span id="king-label">—</span>
         </div>
         <div class="stat"><span class="label">Training source</span><span id="training-label">—</span></div>
-        <div class="stat"><span class="label">Search depth</span><span id="depth-label">6 plies</span></div>
+        <div class="stat"><span class="label">Search depth</span><span id="depth-label">6+ plies (budgeted)</span></div>
         <div class="stat"><span class="label">AI think time</span><span id="think-time">—</span></div>
         <div class="stat"><span class="label">AI moves made</span><span id="ai-move-count">0</span></div>
         <div class="stat"><span class="label">Last search</span><span id="search-effort">—</span></div>
@@ -415,10 +433,10 @@
 
 </main>
 
-<script src="js/checkers.js?v=33"></script>
-<script src="js/render.js?v=33"></script>
-<script src="js/anaconda-network.js?v=33"></script>
-<script src="js/minimax.js?v=33"></script>
-<script src="js/play-strong.js?v=33"></script>
+<script src="js/checkers.js?v=34"></script>
+<script src="js/render.js?v=34"></script>
+<script src="js/anaconda-network.js?v=34"></script>
+<script src="js/minimax.js?v=34"></script>
+<script src="js/play-strong.js?v=34"></script>
 </body>
 </html>

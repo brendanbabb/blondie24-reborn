@@ -89,7 +89,7 @@
     const onGen = opts.onGen || function () {};
     const onError = opts.onError || function () {};
     const WorkerCtor = opts.WorkerCtor || global.Worker;
-    const workerUrl = opts.workerUrl || "js/game-worker.js?v=9";
+    const workerUrl = opts.workerUrl || "js/game-worker.js?v=10";
     const hc = (global.navigator && global.navigator.hardwareConcurrency) || POOL_MAX;
     const poolSize = opts.poolSize ||
       Math.max(POOL_MIN, Math.min(POOL_MAX, hc - 2));

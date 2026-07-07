@@ -145,6 +145,10 @@
 
       // 1. Sub-board filters: filters[i] = tanh(sum_{sq in window_i} pp_w[k]*x[sq] + pp_bias[i]).
       //    We iterate pp_weights linearly (index k) alongside WINDOWS_FLAT.
+      //    Deliberately DENSE: skipping empty squares with a `v !== 0` branch
+      //    was measured 25% SLOWER than multiplying by zero (one branch per
+      //    single multiply-add loses; the 1999 net's sparse win came from
+      //    skipping 40 multiplies per branch via a transposed matrix).
       let k = 0;
       for (let i = 0; i < N_FILTERS; i++) {
         let acc = w[OFF_PP_B + i];
